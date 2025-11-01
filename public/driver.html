@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0078ff" />
+<title>Driver - Multi Rider Tracker (Max 2)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+
+<style>
+  :root { --bg:#0f1724; --panel: rgba(10,10,12,0.9); --accent:#0078ff; --muted:#cbd5e1; }
+  html,body{ height:100%; margin:0; font-family:Inter, system-ui, Arial; background:#eaf2ff; }
+  #map{ height:100vh; width:100%; }
+
+  .sidebar{ position:absolute; top:12px; left:12px; width:380px; max-height:92vh; background:var(--panel); color:white; padding:14px; border-radius:12px; box-shadow:0 8px 30px rgba(2,6,23,0.6); overflow:auto; z-index:1200; }
+  .sidebar.closed{ transform:translateX(-420px); }
+  .toggle-btn{ position:absolute; top:12px; left:12px; z-index:1300; background:#111; color:white; border:none; padding:10px 12px; border-radius:8px; cursor:pointer; }
+  h3{ margin:0 0 8px 0; font-size:18px; text-align:center; }
+  .row { display:flex; gap:8px; align-items:center; }
+  button,input,select{ font-size:14px; padding:8px; border-radius:8px; border:none; }
+  button.primary{ background:var(--accent); color:white; width:100%; cursor:pointer; }
+  button.ghost{ background:#4d4747; color:white; cursor:pointer; }
+  .muted { color:var(--muted); font-size:13px; }
+  .slot{ margin-top:10px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.03); }
+  .slot h4{ margin:0 0 6px 0; font-size:14px; }
+  .small{ font-size:13px; color:#cbd5e1; margin-top:6px; }
+  footer{ margin-top:10px; font-size:12px; color:#9aa4b2; text-align:center; }
+  @media (max-width:480px){ .sidebar{ width:320px } .sidebar.closed{ transform:translateX(-360px);} }
+</style>
+</head>
+<body>
+<audio id="n" src="ringtong.wav"></audio>
+<button class="toggle-btn" id="toggleBtn">☰</button>
+
+<div class="sidebar closed" id="sidebar">
+  <h3>🚗 Driver — Multi Rider (max 2)</h3>
+
+  <p>Status: <strong id="status">Not sharing</strong></p>
+  <p class="muted">Speed: <span id="speed">0</span> km/h — Accuracy: <span id="accuracy">-</span> m</p>
+  <p class="muted">Last updated: <span id="time">-</span></p>
+
+  <div style="margin-top:8px">
+    <button id="toggleShare" class="primary">Start Sharing</button>
+    <div class="row" style="margin-top:8px;">
+      <button id="toggleCenter" class="ghost">Auto-Center: ON</button>
+      <select id="routeMode" style="flex:1;">
+        <option value="car">Car</option>
+        <option value="bike">Bike</option>
+      </select>
+    </div>
+  </div>
+
+  <hr style="border:none; height:1px; background:rgba(255,255,255,0.04); margin:12px 0;" />
+
+  <div class="slot" id="slot1">
+    <h4>Rider Slot 1</h4>
+    <div id="slot1_info" class="small">Empty</div>
+    <div class="row" style="margin-top:8px;">
+      <button onclick="centerSlot('s1')" class="ghost" style="flex:1">Center</button>
+    </div>
+  </div>
+
+  <div class="slot" id="slot2">
+    <h4>Rider Slot 2</h4>
+    <div id="slot2_info" class="small">Empty</div>
+    <div class="row" style="margin-top:8px;">
+      <button onclick="centerSlot('s2')" class="ghost" style="flex:1">Center</button>
+    </div>
+  </div>
+
+  <hr style="border:none; height:1px; background:rgba(255,255,255,0.04); margin:12px 0;" />
+
+  <input id="bookingCode" placeholder="Enter booking code to clear" style="width:95%; margin-bottom:8px;" />
+  <button id="clearByCodeBtn" class="primary">Clear by Booking Code</button>
+  <p id="message" class="small"></p>
+
+  <footer>Connected driver persists across refresh (reconnect supported)</footer>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+
+<script>
+/* ================= Config & state ================= */
+const storedDriverId = localStorage.getItem("driverId");
+const driverId = storedDriverId || prompt("Enter your driver ID (numeric DB id recommended):") || "";
+if (!driverId) alert("Driver ID is required — reload and enter ID.");
+localStorage.setItem("driverId", driverId);
+
+let sharing = false;
+let autoCenter = true;
+let watchId = null;
+let driverMarker = null;
+let lastDriverPos = null;
+let routeMode = "car"; // 'car' or 'bike'
+
+// two slots: s1, s2 (max 2 riders)
+const slots = {
+  s1: { riderId: null, bookingCode: null, marker: null, route: null },
+  s2: { riderId: null, bookingCode: null, marker: null, route: null }
+};
+
+/* ================= DOM ================= */
+const sidebar = document.getElementById("sidebar");
+const toggleBtn = document.getElementById("toggleBtn");
+const statusEl = document.getElementById("status");
+const speedEl = document.getElementById("speed");
+const accEl = document.getElementById("accuracy");
+const timeEl = document.getElementById("time");
+const shareBtn = document.getElementById("toggleShare");
+const centerBtn = document.getElementById("toggleCenter");
+const routeModeEl = document.getElementById("routeMode");
+const bookingCodeInput = document.getElementById("bookingCode");
+const clearByCodeBtn = document.getElementById("clearByCodeBtn");
+const messageEl = document.getElementById("message");
+const slot1Info = document.getElementById("slot1_info");
+const slot2Info = document.getElementById("slot2_info");
+
+/* ================= Map ================= */
+const map = L.map("map").setView([20.5937,78.9629],5);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{ attribution:'© OpenStreetMap contributors' }).addTo(map);
+
+/* ================= Socket ================= */
+const socket = io({ reconnection:true, transports:['websocket','polling'] });
+
+socket.on("connect", ()=> {
+  console.log("Socket connected");
+  socket.emit("registerDriver", { driverId });
+});
+
+/* ================= UI handlers ================= */
+toggleBtn.addEventListener("click", ()=> {
+  sidebar.classList.toggle("closed");
+  toggleBtn.textContent = sidebar.classList.contains("closed") ? "☰" : "✖";
+});
+
+shareBtn.addEventListener("click", ()=> sharing ? stopSharing() : startSharing());
+window.addEventListener("load", () => {
+  startSharing();
+});
+
+centerBtn.addEventListener("click", ()=> {
+  autoCenter = !autoCenter;
+  centerBtn.textContent = `Auto-Center: ${autoCenter ? "ON" : "OFF"}`;
+});
+routeModeEl.addEventListener("change", ()=> {
+  routeMode = routeModeEl.value;
+  // recreate routes using new profile
+  ["s1","s2"].forEach(id => {
+    if (slots[id].route) {
+      try { map.removeControl(slots[id].route); } catch (e) {}
+      slots[id].route = null;
+      if (slots[id].marker && driverMarker) createRoute(id);
+    }
+  });
+});
+clearByCodeBtn.addEventListener("click", clearByCode);
+
+/* ================= Helpers ================= */
+function setSharingState(on) {
+  sharing = on;
+  statusEl.textContent = on ? "Sharing" : "Not sharing";
+  statusEl.style.color = on ? "lightgreen" : "lightcoral";
+  shareBtn.textContent = on ? "Stop Sharing" : "Start Sharing";
+}
+
+function formatTime(ts){ return new Date(ts).toLocaleTimeString(); }
+function haversineKm(lat1, lon1, lat2, lon2){
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI/180;
+  const dLon = (lon2 - lon1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/* ================= Share location (driver) ================= */
+function startSharing(){
+  if (!navigator.geolocation) return alert("Geolocation not supported in this browser.");
+
+  setSharingState(true);
+  // update DB online flag
+  fetch("/updateOnline", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: driverId, online: true }) });
+
+  watchId = navigator.geolocation.watchPosition(position => {
+    const { latitude: lat, longitude: lng, speed, accuracy } = position.coords;
+    const ts = position.timestamp || Date.now();
+    lastDriverPos = { lat, lng, speed, accuracy, ts };
+
+    // send to server
+    socket.emit("driverLocation", { lat, lng, speed, accuracy });
+
+    // update map marker
+    if (!driverMarker) {
+      driverMarker = L.marker([lat, lng]).addTo(map).bindPopup("You (Driver)").openPopup();
+    } else {
+      driverMarker.setLatLng([lat, lng]);
+    }
+
+    // update UI
+    speedEl.textContent = speed ? (speed * 3.6).toFixed(1) : 0;
+    accEl.textContent = accuracy ? accuracy.toFixed(1) : "-";
+    timeEl.textContent = formatTime(ts);
+
+    // update routes
+    ["s1","s2"].forEach(id => {
+      if (slots[id].marker) updateRoute(id);
+    });
+
+    if (autoCenter && driverMarker) map.setView([lat, lng]);
+  }, err => {
+    console.warn("Geolocation error:", err.message);
+    messageEl.innerText = "GPS error: " + err.message;
+  }, { enableHighAccuracy:true, timeout:10000, maximumAge:1000 });
+}
+
+function stopSharing(){
+  setSharingState(false);
+  fetch("/updateOnline", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: driverId, online: false }) });
+  if (watchId) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+}
+
+/* ================= Booking / rider events ================= */
+socket.on("bookingConfirmed", ({ riderId, lat, lng, bookingCode }) => {
+  if (slots.s1.riderId === riderId || slots.s2.riderId === riderId) return;
+
+  const emptySlot = !slots.s1.riderId ? "s1" : (!slots.s2.riderId ? "s2" : null);
+  if (!emptySlot) {
+    alert("New booking arrived but you already have 2 riders.");
+    return;
+  }
+
+  // Save booking info
+  slots[emptySlot].riderId = riderId;
+  slots[emptySlot].bookingCode = bookingCode || "—"; // ✅ show bookingCode
+  slots[emptySlot].marker = createRiderMarker(lat, lng, riderId);
+  updateSlotInfo(emptySlot);
+  createRoute(emptySlot);
+
+  document.body.addEventListener("click", () => {
+  const n = document.getElementById("n");
+  n.play().catch(() => console.log("🔈 Sound unlocked"));
+}, { once: true });
+});
+// Rider location updates (server emits to driver)
+socket.on("riderPositionUpdate", ({ riderId, lat, lng }) => {
+  // find slot
+  const slotKey = (slots.s1.riderId === riderId) ? "s1" : (slots.s2.riderId === riderId ? "s2" : null);
+  if (!slotKey) {
+    // if there's an empty slot, attach to it
+    const emptySlot = !slots.s1.riderId ? "s1" : (!slots.s2.riderId ? "s2" : null);
+    if (!emptySlot) return; // both full — ignore
+    slots[emptySlot].riderId = riderId;
+    slots[emptySlot].marker = createRiderMarker(lat, lng, riderId);
+    updateSlotInfo(emptySlot);
+    createRoute(emptySlot);
+    return;
+  }
+
+  // update marker and route
+  if (slots[slotKey].marker) slots[slotKey].marker.setLatLng([lat, lng]);
+  else slots[slotKey].marker = createRiderMarker(lat, lng, riderId);
+  updateSlotInfo(slotKey);
+  updateRoute(slotKey);
+});
+/* ================= Marker & routing utilities ================= */
+function createRiderMarker(lat, lng, riderId) {
+  const icon = L.icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/3448/3448339.png", iconSize: [36,36], iconAnchor:[18,36] });
+  const m = L.marker([lat || 0, lng || 0], { icon }).addTo(map).bindPopup(`Rider: ${riderId}`);
+  return m;
+}
+
+function createRoute(slotKey) {
+  if (!driverMarker || !slots[slotKey].marker) return;
+  // remove old
+  if (slots[slotKey].route) {
+    try { map.removeControl(slots[slotKey].route); } catch(e) {}
+    slots[slotKey].route = null;
+  }
+
+  const driverPos = driverMarker.getLatLng();
+  const riderPos = slots[slotKey].marker.getLatLng();
+  const profile = routeMode === "bike" ? "bike" : "car";
+  const color = slotKey === "s1" ? "#2a7cff" : "#16a34a"; // blue/green
+  const dash = slotKey === "s2" ? "6,8" : null;
+
+  slots[slotKey].route = L.Routing.control({
+    waypoints: [driverPos, riderPos],
+    router: L.Routing.osrmv1({
+      serviceUrl: 'https://router.project-osrm.org/route/v1',
+      profile: profile
+    }),
+    routeWhileDragging: false,
+    addWaypoints: false,
+    draggableWaypoints: false,
+    createMarker: ()=>null,
+    show: false,
+    lineOptions: {
+      styles: [{ color, opacity:0.9, weight:5, dashArray: dash }]
+    }
+  }).addTo(map);
+
+  if (autoCenter) {
+    const bounds = L.latLngBounds([driverPos, riderPos]);
+    map.fitBounds(bounds, { padding: [50,50] });
+  }
+}
+
+function updateSlotInfo(slotKey) {
+  const infoEl = slotKey === "s1" ? slot1Info : slot2Info;
+  const slot = slots[slotKey];
+
+  if (!slot.riderId && !slot.bookingCode) {
+    infoEl.innerText = "Empty";
+    return;
+  }
+  const m = slot.marker;
+  const latlng = m ? m.getLatLng() : null;
+  const label = slot.bookingCode
+    ? `Booking Code:<div style="font-size:20px;color:green;">${slot.bookingCode}</div>`
+    : `Rider ID: ${slot.riderId}`;
+
+  infoEl.innerHTML = `${label}${latlng ? `<br>Lat:${latlng.lat.toFixed(5)}, Lng:${latlng.lng.toFixed(5)}` : ""}`;
+}
+
+function updateRoute(slotKey) {
+  if (!slots[slotKey].route) {
+    createRoute(slotKey);
+    return;
+  }
+  if (!driverMarker || !slots[slotKey].marker) return;
+
+  try {
+    slots[slotKey].route.setWaypoints([
+      driverMarker.getLatLng(),
+      slots[slotKey].marker.getLatLng()
+    ]);
+  } catch (e) {
+    try { map.removeControl(slots[slotKey].route); } catch (e) {}
+    slots[slotKey].route = null;
+    createRoute(slotKey);
+  }
+
+  const d = haversineKm(
+    driverMarker.getLatLng().lat,
+    driverMarker.getLatLng().lng,
+    slots[slotKey].marker.getLatLng().lat,
+    slots[slotKey].marker.getLatLng().lng
+  );
+
+  const etaMin = Math.max(1, Math.round(d / 0.5));
+  const infoEl = slotKey === "s1" ? slot1Info : slot2Info;
+  const slot = slots[slotKey];
+  const label = slot.bookingCode
+    ? `Booking Code: ${slot.bookingCode}`
+    : `Rider ID: ${slot.riderId}`;
+
+  infoEl.innerHTML = `${label}<br>Distance: ${d.toFixed(2)} km — ETA: ${etaMin} min`;
+}
+
+
+function removeSlot(slotKey) {
+  if (slots[slotKey].marker) {
+    try { map.removeLayer(slots[slotKey].marker); } catch(e) {}
+    slots[slotKey].marker = null;
+  }
+  if (slots[slotKey].route) {
+    try { map.removeControl(slots[slotKey].route); } catch(e) {}
+    slots[slotKey].route = null;
+  }
+  slots[slotKey].riderId = null;
+  slots[slotKey].bookingCode = null;
+  updateSlotInfo(slotKey);
+}
+
+/* ================= Clear booking actions ================= */
+async function clearByCode(){
+  const code = bookingCodeInput.value.trim();
+  if (!code) { messageEl.innerText = "Enter booking code to clear."; return; }
+
+  try {
+    const res = await fetch("/target", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ bookingCode: code }) });
+    const data = await res.json();
+    messageEl.innerText = `✅ ${data.message}`;
+    // If this code matches a slot's bookingCode in memory, remove it.
+    ["s1","s2"].forEach(k => {
+      if (slots[k].bookingCode && slots[k].bookingCode === code) removeSlot(k);
+    });
+    // We don't have booking codes by default (rider holds it). Driver can clear by entering code manually.
+  } catch (err) {
+    console.error("Clear booking error:", err);
+    messageEl.innerText = "❌ Failed to clear booking. Try again.";
+  }
+}
+
+function clearSlotPrompt(slotKey) {
+  const code = prompt("Enter booking code to clear this rider (obtain from rider):");
+  if (!code) return;
+  bookingCodeInput.value = code;
+  clearByCode();
+}
+
+function centerSlot(slotKey) {
+  if (!slots[slotKey].marker) return alert("No rider in this slot.");
+  const latlng = slots[slotKey].marker.getLatLng();
+  map.setView(latlng, 15);
+}
+
+/* ================= Persist & reconnect ================= */
+// On socket connect server sends bookingConfirmed for any active riders in DB (registerDriver handler)
+socket.on("connect", ()=> {
+  socket.emit("registerDriver", { driverId });
+  // if we are sharing, re-emit last position so server has updated socketId & last pos
+  if (sharing && lastDriverPos) socket.emit("driverLocation", lastDriverPos);
+});
+
+/* ================= Misc ================= */
+socket.on("disconnect", ()=> console.log("Socket disconnected"));
+socket.on("connect_error", err => console.warn("Socket connect error", err));
+
+/* ================= Utility functions ================= */
+function haversineKm(lat1, lon1, lat2, lon2){
+  const R = 6371;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLon = (lon2-lon1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+socket.on("bookingCancelled", ({ bookingCode }) => {
+  console.log("Booking cancelled:", bookingCode);
+  alert(`Rider cancelled booking ${bookingCode}`);
+});
+
+</script>
+</body>
+</html>

@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Cab Tracker - Real-Time Demo</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: "Poppins", sans-serif;
+    }
+
+    body {
+      background: #f8f9fb;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    /* ---------- HEADER ---------- */
+    header {
+      width: 100%;
+      height: 280px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    header img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: brightness(0.7);
+      transition: transform 8s ease-in-out;
+    }
+
+    header img:hover {
+      transform: scale(1.05);
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.4), rgba(0,0,0,0.6));
+    }
+
+    header h1 {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #fff;
+      font-size: 2rem;
+      font-weight: 700;
+      text-align: center;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      letter-spacing: 1px;
+    }
+    /*--------------driver css--------------------*/
+    
+    input[type="text"],
+    input[type="email"],
+    input[type="password"] {
+      width: 100%;
+      padding: 12px 20px;
+      margin: 8px 0;
+      box-sizing: border-box;
+      border: 2px solid #ccc;
+      border-radius: 4px;
+  
+    }
+
+    input[type="submit"] {
+      background: linear-gradient(124deg, rgb(33, 35, 194), black, blue);
+      width: 100%;
+      padding: 14px 22px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 20px;
+      color: antiquewhite;
+      margin-top: 20px;
+    }
+
+    label {
+      font-size: 18px;
+      font-weight: bold;
+      display: block;
+      margin-top: 10px;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 18px;
+      background-color: rgb(33, 35, 194);
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 15px;
+    }
+
+    /* --- Popup Modal --- */
+    .popup-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      transition: opacity 0.3s ease;
+    }
+
+    .booking-form {
+      background: linear-gradient(123deg, rgb(154, 154, 247), rgb(82, 73, 73));
+      border-radius: 15px;
+      padding: 2rem;
+      width: 90%;
+      max-width: 450px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+      color: rgb(31, 29, 29);
+      position: relative;
+      animation: popupAnim 0.3s ease;
+    }
+
+    @keyframes popupAnim {
+      from { transform: scale(0.8); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    .close-btn {
+      position: absolute;
+      top: 1px;
+      right: 10px;
+      color:black;
+      border: none;
+      border-radius: 50%;
+      width: 35px;
+      height: 35px;
+      font-size: 30px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    /*----------------message css-------------------*/
+    .h{
+      bottom:65px;
+      font-size: 99px;
+    }
+    .mess{
+      display:flex;
+      color:red;
+      font-size: small;
+      border-radius: 8px;
+      background: #242222;
+      padding: 12px 29px;
+      box-shadow: #424041 0px 0px 10px 0px;
+      font-size:20px;
+      margin-bottom: 7px;
+      position:relative;
+      
+    }
+    .mess.mess::after{
+      content: "";
+      position: absolute;
+      width:0px;
+      height: 0px;
+      left: 15px;  /* distance from box */
+      top: 105%;
+      transform: translateY(-50%);
+      border-top: 19px transparent;
+      border-bottom: 8px solid transparent;
+      border-right: 7px solid #121312;
+
+    }
+    /* ---------- MAIN SECTION ---------- */
+    .main {
+      margin-top: -50px;
+      width: 90%;
+      max-width: 1100px;
+      background: #fff;
+      border-radius: 20px;
+      padding: 2rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      z-index: 10;
+      animation: fadeIn 1s ease;
+    }
+
+    .intro {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .intro h2 {
+      color: #007bff;
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .intro p {
+      color: #666;
+      font-size: 1rem;
+    }
+
+    /* ---------- BOOKING FORM ---------- */
+    .booking-form {
+      background: #f1f4f8;
+      border-radius: 15px;
+      padding: 1.5rem;
+      margin: 1.5rem auto;
+      max-width: 600px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .booking-form h3 {
+      text-align: center;
+      color: #007bff;
+      margin-bottom: 1rem;
+      font-size: 1.3rem;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #444;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+    }
+
+    .form-group input:focus {
+      border-color: #007bff;
+      box-shadow: 0 0 6px rgba(0,123,255,0.3);
+      outline: none;
+    }
+
+    .book-btn {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      background: #007bff;
+      color: #fff;
+      font-weight: 600;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    .book-btn:hover {
+      background: #0056b3;
+    }
+
+    /* ---------- DRIVER LIST ---------- */
+    #driversList {
+      margin-top: 1rem;
+      max-height: 300px;
+      overflow-y: auto;
+      border-top: 1px dashed #ccc;
+      padding-top: 8px;
+    }
+
+    .driverItem {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 6px;
+      border-bottom: 1px solid #eee;
+      border-radius: 6px;
+      margin-bottom: 4px;
+      background: #b3a9a9;
+    }
+
+    .driverItem button {
+      padding: 6px 10px;
+      border: none;
+      border-radius: 6px;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+
+    .driverItem button:disabled {
+      background: #999;
+      cursor: not-allowed;
+    }
+
+    /* ---------- FEATURE CARDS ---------- */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .card {
+      background: linear-gradient(135deg, #007bff, #00bcd4);
+      color: #fff;
+      border-radius: 16px;
+      padding: 1.5rem;
+      text-align: center;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    }
+
+    .card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+
+    .card h3 {
+      font-size: 1.3rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .card p {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      opacity: 0.9;
+    }
+
+    .btn {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 10px 22px;
+      background: #fff;
+      color: #007bff;
+      border-radius: 25px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.3s ease;
+    }
+
+    .btn:hover {
+      background: #007bff;
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+    }
+
+    /* ---------- FOOTER ---------- */
+    footer {
+      margin: 30px 0;
+      font-size: 0.9rem;
+      color: #555;
+      text-align: center;
+    }
+
+    footer span {
+      color: #007bff;
+      font-weight: 600;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 480px) {
+      header h1 {
+        font-size: 1.6rem;
+      }
+      .main {
+        padding: 1.3rem;
+      }
+      .card h3 {
+        font-size: 1.2rem;
+      }
+      .mess{
+        font-size: 13px;
+      }
+      .h{
+      bottom:60px;
+      font-size: 40px;
+    }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="https://images.unsplash.com/photo-1600320254374-ce2d293c324e?auto=format&fit=crop&w=1200&q=80" alt="AI Cab Project Header">
+    <div class="overlay"></div>
+    <h1 class="h">Transportation Helper</h1>
+  </header>
+
+  <div class="main">
+    <div class="intro">
+      <h2>Experience Real-Time Ride Tracking</h2>
+      <p>Open the app as a <strong>Driver</strong> or <strong>Rider</strong> on different devices and see live AI-based location updates using GPS and Socket.io.</p>
+    </div>
+
+    <!-- Booking form -->
+    <div class="booking-form">
+      <h3>🚕 Book Your Ride</h3>
+      <div class="form-group">
+        <label for="pickup">Pickup Location</label>
+        <div id="message1"></div>
+        <input type="text" id="pickup" placeholder="Enter your pickup point">
+        
+      </div>
+      <div class="form-group">
+        <label for="destination">Destination</label>
+        <div id="message2"></div>
+        <input type="text" id="destination" placeholder="Enter your destination">
+      </div>
+      <button class="book-btn" id="showDriversBtn">Show Available Drivers</button>
+      <div id="driversList">
+        <p style="color:#888;">Driver list will appear here after entering pickup & destination.</p>
+      </div>
+    </div>
+
+    <div class="card">
+        <h3>🧍 Rider Mode</h3>
+        <p>See your driver’s live location, ETA, and movement on an interactive map with instant updates via WebSocket connection.</p>
+        <a href="/rider.html" class="btn">Open Rider App</a>
+      </div>
+      
+    <div class="features">
+      <div class="card">
+        <h3>🚖 Driver Mode</h3>
+        <p>Track your vehicle’s exact position in real-time and broadcast updates to riders with advanced accuracy and low latency.</p>
+        <button onclick="openLoginPopup()" class="btn">Driver Login</button>
+      </div>
+
+      <div class="card">
+        <h3>🤖 AI Tracking</h3>
+        <p>Powered by Node.js, Express & Socket.io, this AI module ensures efficient route prediction and smart ride synchronization.</p>
+      </div>
+    </div>
+  </div>
+   <div class="popup-overlay" id="popup">
+    <div class="booking-form">
+      <button class="close-btn" onclick="c()">×</button>
+      <form id="registerForm">
+        <label for="name">Name</label>
+      <input type="text" id="name" name="name" placeholder="Enter the name" required />
+
+      <label for="mobile">Mobile No.</label>
+      <input type="text" id="mobile" name="mobile" placeholder="Enter the mobile no..." required />
+
+      <label for="gmail">Gmail</label>
+      <input type="email" id="gmail" name="gmail" placeholder="Enter the gmail" required />
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="Enter the password" required />
+
+      <label for="conform">Confirm Password</label>
+      <input type="password" id="conform" name="conform" placeholder="Confirm the password" required />
+
+      <input type="submit" value="Submit" />
+      <p id="message"></p>
+      </form>
+    </div>
+  </div>
+  <footer>
+    © 2025 <span>AI Cab Tracker</span> | Built with ❤️ by Chintu
+  </footer>
+
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js" crossorigin="anonymous"></script>
+<script>
+  /*Driver information in the databases*/
+  document.getElementById("registerForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      const name = document.getElementById("name").value;
+      const mobile = document.getElementById("mobile").value;
+      const gmail = document.getElementById("gmail").value;
+      const password = document.getElementById("password").value;
+      const conform = document.getElementById("conform").value;
+
+      if (password !== conform) {
+        document.getElementById("message").innerText = "Passwords do not match!";
+        return;
+      }
+
+fetch("/insert", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    name,
+    gmail,
+    password,
+    mobile,
+    role: "driver", // or "rider"
+  }),
+})
+  .then((res) => res.json())
+  .then((data) => {
+    document.getElementById("message").innerText = data.message;
+
+    if (data.driver_id) {
+      localStorage.setItem("driverId", data.driver_id);
+      console.log("Driver registered with ID:", data.driver_id);
+    }
+
+    registerForm.reset();
+  })
+  .catch((err) => console.error(err));
+  });
+  /*server sider languages connection*/
+  const socket = io({
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    transports: ['websocket', 'polling']
+  });
+
+  let driversData = {}; // latest driver info
+  let myCoords = null;
+
+  const showDriversBtn = document.getElementById('showDriversBtn');
+  const driversList = document.getElementById('driversList');
+  const pickupInput = document.getElementById('pickup');
+  const destinationInput = document.getElementById('destination');
+
+  // 🌍 Send rider's real GPS location to server
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      (pos) => {
+        myCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        socket.emit('riderLocation', myCoords);
+      },
+      (err) => console.warn("Location access denied:", err),
+      { enableHighAccuracy: true, maximumAge: 10000 }
+    );
+  } else {
+    alert("Geolocation is not supported in your browser.");
+  }
+
+  // 🔄 Receive all drivers' data
+  socket.on('updateDrivers', (drivers) => {
+    driversData = drivers;
+  });
+  // 🚕 Show unbooked drivers when form is filled
+  showDriversBtn.addEventListener('click', () => {
+    const pickup = pickupInput.value.trim();
+    const destination = destinationInput.value.trim();
+    //driver information
+    const popup = document.getElementById("popup");
+    if(pickup==="Driverdanapur"&&destination==="chintukr@@123"){
+     popup.style.display = "flex";
+    }
+    
+    if (!pickup) {
+      document.getElementById("message1").innerHTML=`<span class="mess">Please Enter pickup point</span>`;
+      setTimeout(()=>{
+        document.getElementById("message1").innerHTML='';
+      },5000);
+      return;
+    }else if (!destination){
+      document.getElementById("message2").innerHTML=`<span class="mess">Please Enter destination point</span>`;
+      setTimeout(()=>{
+        document.getElementById("message2").innerHTML='';
+      },5000);
+      return;
+    }else{
+    pickupInput.value = "";
+    destinationInput.value = "";
+    }
+    updateDriverList();
+  });
+  function c() {
+    document.getElementById("popup").style.display = "none";
+  }
+  // 🧾 Display available drivers dynamically
+  function updateDriverList() {
+  driversList.innerHTML = '';
+
+  // Filter drivers: show only those who have at least one empty rider slot
+  const unbooked = Object.entries(driversData).filter(([id, d]) => {
+    // Driver has rider1_id and rider2_id fields (sent from server)
+    const rider1 = d.rider1_id;
+    const rider2 = d.rider2_id;
+
+    // Driver is available if at least one slot is empty
+    return !(rider1 && rider2); 
+  });
+
+  if (unbooked.length === 0) {
+    driversList.innerHTML = '<p style="color:#888;">No available drivers nearby.</p>';
+    return;
+  }
+
+  unbooked.forEach(([id, d]) => {
+    const div = document.createElement('div');
+    div.className = 'driverItem';
+    div.innerHTML = `<span>🚗 Driver ID: ${id.substring(0, 6)}...</span>`;
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Book';
+    btn.onclick = () => {
+      socket.emit('bookDriver', id);
+      btn.disabled = true;
+      btn.textContent = 'Booking...';
+    };
+
+    div.appendChild(btn);
+    driversList.appendChild(div);
+  });
+}
+
+  // ✅ Booking Success
+  socket.on('bookingSuccess', ({ driverId ,bookingCode}) => {
+    const btn = [...document.querySelectorAll('.driverItem button')].find(
+      (b) => b.parentElement.textContent.includes(driverId.substring(0, 6))
+    );
+    if (btn) {
+      btn.textContent = 'Booked';
+      btn.disabled = true;
+    }
+    alert(`✅ Driver ${bookingCode} booked successfully!`);
+  });
+
+  // ❌ Booking Failure
+  socket.on('bookingFailed', (msg) => {
+    alert(`❌ Booking failed: ${msg}`);
+    console.log("my name is chintu:",msg);
+  });
+
+  function openLoginPopup() { document.getElementById("loginPopup").style.display = "flex"; }
+  function closePopup() {
+    document.getElementById("popup").style.display = "none";
+    document.getElementById("loginPopup").style.display = "none";
+  }
+function loginDriver() {
+  const gmail = document.getElementById("loginGmail").value.trim();
+  const password = document.getElementById("loginPassword").value.trim();
+
+  if (!gmail || !password) {
+    document.getElementById("loginMessage").innerText = "Please fill all fields.";
+    return;
+  }
+
+  fetch("/loginDriver", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gmail, password }) // send as object
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      localStorage.setItem("driverId", data.userId);
+      localStorage.setItem("driverName", data.name);
+      window.location.href = "/driver.html";
+    } else {
+      document.getElementById("loginMessage").innerText = data.message;
+    }
+  })
+  .catch(err => console.error("Error during login:", err));
+}
+
+</script>
+<div class="popup-overlay" id="loginPopup">
+  <div class="booking-form">
+    <button class="close-btn" onclick="closePopup()">×</button>
+    <h3>Driver Login</h3>
+    <label>Gmail</label>
+    <input type="email" id="loginGmail" placeholder="Enter Gmail" required />
+    <label>Password</label>
+    <input type="password" id="loginPassword" placeholder="Enter Password" required />
+    <button class="btn" onclick="loginDriver()">Login</button>
+    <p id="loginMessage"></p>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,373 @@
+<!-- public/rider.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0078ff" />
+<title>Rider - Book & Track Cab</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  html, body { height:100%; margin:0; padding:0; font-family:"Poppins", Arial, sans-serif; background:#f7f9fc; }
+  #map { height:100vh; width:100%; }
+  .sidebar { position:absolute; top:10px; left:10px; width:40%; max-height:90vh; background:rgba(34,34,34,0.95); color:white; padding:15px; border-radius:12px; overflow-y:auto; transition:transform 0.3s ease; z-index:1000; }
+  .sidebar.closed { transform:translateX(-102%); }
+  .sidebar h3 { font-size:18px; margin-bottom:10px; text-align:center; }
+  .driverItem { padding:8px 6px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .driverItem button { padding:6px 8px; border-radius:8px; border:none; cursor:pointer; background:#0078ff; color:white; }
+  .small { font-size:13px; color:hsl(0,0%,33%); }
+  #drivers { margin-top:10px; max-height:140px; overflow:auto; border-top:1px dashed #e8eaf0; padding-top:8px; }
+  .toggle-btn { position:absolute; top:10px; left:10px; background:#222; color:white; border:none; cursor:pointer; padding:15px 23px; font-size:20px; border-radius:8px; z-index:1100; transition: background 0.3s; }
+  .toggle-btn:hover { background:#444; }
+  #centerBtn { margin-top:8px; width:100%; padding:10px; border-radius:8px; border:none; background:#413636; border:1px solid #ee0886; cursor:pointer; }
+  input, button { font-size:14px; padding:6px 8px; margin:3px 0; }
+  @media (max-width:480px) { .sidebar{ width:310px; } .sidebar.closed{ transform:translateX(-350px); } }
+</style>
+</head>
+<body>
+<button class="toggle-btn" id="toggleBtn">☰</button>
+
+<div class="sidebar closed" id="sidebar">
+  <h3>🚖 Rider Menu</h3>
+  <button id="centerBtn">Auto-Center: ON</button>
+  <p>Status: <span id="status">Idle</span></p>
+  <div id="message"></div>
+  <p>Speed: <span id="speed">0</span> km/h — Accuracy: <span id="accuracy">-</span> m</p>
+  <p>Last update: <span id="time">-</span></p>
+  <p>BookingCode: <span id="d"></span></p>
+  <input type="text" id="bookingInput" placeholder="Enter booking code" />
+<button id="trackBtn">Track</button>
+  <h4>Nearby Drivers</h4>
+  <div id="drivers"><div class="small">Searching for drivers…</div></div>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+
+<script>
+const sidebar = document.getElementById("sidebar");
+const toggleBtn = document.getElementById("toggleBtn");
+toggleBtn.addEventListener("click", () => {
+  sidebar.classList.toggle("closed");
+  toggleBtn.textContent = sidebar.classList.contains("closed") ? "☰" : "✖";
+});
+
+const socket = io({ reconnection:true, reconnectionAttempts: Infinity, transports: ['websocket','polling'] });
+
+const map = L.map('map').setView([0,0],13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+const statusEl = document.getElementById('status');
+const speedEl = document.getElementById('speed');
+const accuracyEl = document.getElementById('accuracy');
+const timeEl = document.getElementById('time');
+const driversEl = document.getElementById('drivers');
+const centerBtn = document.getElementById('centerBtn');
+
+let riderMarker = null;
+let driverMarkers = {};
+let bookedDriver = null;
+let bookingCode = null;
+let routeLine = null;
+let autoCenter = true;
+let lastRiderPos = null;
+let currentCode = null;
+let driverMarker= null;
+
+const geoOpts = { enableHighAccuracy:true, timeout:10000, maximumAge:1000 };
+
+centerBtn.addEventListener('click', ()=> {
+  autoCenter=!autoCenter;
+  centerBtn.textContent=`Auto-Center: ${autoCenter?'ON':'OFF'}`;
+});
+
+function formatTime(d){ return new Date(d).toLocaleTimeString(); }
+function getDistanceKm(lat1,lon1,lat2,lon2){ 
+  const R=6371;
+  const dLat=(lat2-lat1)*Math.PI/180;
+  const dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// Track rider location
+if(navigator.geolocation){
+  navigator.geolocation.watchPosition(pos=>{
+    const { latitude:lat, longitude:lng, speed, accuracy }=pos.coords;
+    const ts=pos.timestamp||Date.now();
+    lastRiderPos=[lat,lng];
+    socket.emit('riderLocation',{ lat,lng,speed,accuracy,ts });
+
+    if(!riderMarker){
+      riderMarker = L.marker([lat,lng]).addTo(map).bindPopup('You (Rider)').openPopup();
+    } else { riderMarker.setLatLng([lat,lng]); }
+
+    if(autoCenter) map.setView([lat,lng],15);
+
+    speedEl.textContent = speed? (speed*3.6).toFixed(1):0;
+    accuracyEl.textContent = accuracy? accuracy.toFixed(1):'-';
+    timeEl.textContent = formatTime(ts);
+
+    // update route if we have a booked driver
+    if (bookedDriver && driverMarkers[bookedDriver]) {
+      updateRouteToDriver(bookedDriver);
+    }
+  }, err=>alert('Location error: '+err.message), geoOpts);
+} else { alert('Geolocation not supported'); }
+
+// Update drivers list (sanitized payload from server)
+socket.on('updateDrivers', (drivers) => {
+  driversEl.innerHTML = '';
+
+  for (const id in drivers) {
+    const d = drivers[id];
+    if (!d) continue;
+
+    // Count how many riders currently booked
+    const bookedCount = (d.rider1_id ? 1 : 0) + (d.rider2_id ? 1 : 0);
+    const isFull = bookedCount >= 2;
+
+    // show or create marker
+    if (!driverMarkers[id]) {
+      const icon = L.icon({
+        iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      });
+      const mk = L.marker([d.lat || 0, d.lng || 0], { icon });
+      mk.addTo(map);
+      mk.on('click', () => tryBookDriver(id));
+      driverMarkers[id] = mk;
+    } else if (d.lat != null && d.lng != null) {
+      driverMarkers[id].setLatLng([d.lat, d.lng]);
+    }
+
+    // reduce opacity if both slots are full
+    driverMarkers[id].setOpacity(isFull ? 0.4 : 1);
+
+    // create driver info box
+    const item = document.createElement('div');
+    item.className = 'driverItem';
+
+    const left = document.createElement('div');
+    const distance =
+      lastRiderPos && d.lat && d.lng
+        ? getDistanceKm(d.lat, d.lng, lastRiderPos[0], lastRiderPos[1]).toFixed(2) + ' km'
+        : '';
+    left.innerHTML = `
+      <div>🚗 Driver: ${id}</div>
+      <div class="small">${distance}</div>
+      <div class="small">${bookedCount}/2 booked</div>
+    `;
+
+    // set button text and state
+    const btn = document.createElement('button');
+    if (isFull) {
+      btn.textContent = 'Booked';
+      btn.disabled = true;
+    } else if (bookedCount === 1) {
+      btn.textContent = '1 Slot Left';
+      btn.disabled = false;
+    } else {
+      btn.textContent = 'Book';
+      btn.disabled = false;
+    }
+    
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (!isFull) {
+        tryBookDriver(id);
+      }
+    };
+
+    item.appendChild(left);
+    item.appendChild(btn);
+    driversEl.appendChild(item);
+  }
+
+  if (Object.keys(drivers).length === 0) {
+    driversEl.innerHTML = '<div class="small">No drivers available nearby</div>';
+  }
+});
+
+
+function tryBookDriver(driverId){
+  if(!lastRiderPos) {
+    alert("📍 Waiting for your location…");
+    return;
+  }
+  if(bookedDriver) {
+    alert('You already have a booked driver.');
+    return;
+  }
+  if (!confirm('Book driver ' + driverId + '?')) return;
+
+  const [lat,lng] = lastRiderPos;
+  // ensure server has our latest location first
+  socket.emit("riderLocation", { lat, lng });
+  setTimeout(()=> { socket.emit('bookDriver', driverId); }, 200);
+}
+
+// Booking results
+socket.on("bookingSuccess", ({ driverId, bookingCode, slot }) => {
+    alert("booking successful your booking code:");
+    document.getElementById("d").innerText=bookingCode;
+});
+
+
+socket.on("bookingFailed", msg => alert('Booking failed: '+msg));
+
+// Driver updates to rider
+socket.on('driverPositionUpdate', ({ driverId, lat, lng }) => {
+  // update marker
+  if (driverMarkers[driverId]) {
+    driverMarkers[driverId].setLatLng([lat, lng]);
+  }
+  // if this is our booked driver, show route/ETA
+  if (bookedDriver === driverId && riderMarker) {
+    updateRouteToDriver(driverId);
+  }
+});
+
+// Rider reconnect on page load and on socket connect
+async function attemptReconnectStoredBooking() {
+  const storedDriverId = localStorage.getItem("driverId");
+  const storedBookingCode = localStorage.getItem("bookingCode");
+  if(storedDriverId && storedBookingCode) {
+    try {
+      const res = await fetch("/reconnectRider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driverId: storedDriverId, bookingCode: storedBookingCode })
+      });
+      const data = await res.json();
+      if (data.success) {
+        bookedDriver = storedDriverId;
+        bookingCode = storedBookingCode;
+        alert("✅ Reconnected to your ride!");
+      } else {
+        // expired or invalid
+        localStorage.removeItem("driverId");
+        localStorage.removeItem("bookingCode");
+        bookedDriver = null;
+        bookingCode = null;
+      }
+    } catch (err) {
+      console.error("Reconnect error:", err);
+    }
+  }
+}
+
+socket.on('connect', () => {
+  console.log('Socket connected');
+  // try reconnect if we had a stored booking
+  attemptReconnectStoredBooking();
+});
+socket.on('disconnect', () => console.log('Socket disconnected'));
+
+// When driver disconnects, server emits riderDisconnected. Clear route/marker for that rider.
+socket.on('riderDisconnected', (riderId) => {
+  // not used on rider side but keep for completeness
+  console.log('riderDisconnected for', riderId);
+});
+
+// Update route/line from driver to rider
+function updateRouteToDriver(driverId) {
+  if (!driverMarkers[driverId] || !riderMarker) return;
+  const driverPos = driverMarkers[driverId].getLatLng();
+  const riderPos = riderMarker.getLatLng();
+
+  if (!routeLine) {
+    routeLine = L.polyline([driverPos, riderPos], { color: '#2a7cff', weight: 4 }).addTo(map);
+  } else {
+    routeLine.setLatLngs([driverPos, riderPos]);
+  }
+
+  const distance = getDistanceKm(driverPos.lat, driverPos.lng, riderPos.lat, riderPos.lng);
+  const etaMin = Math.max(1, Math.round(distance / 0.5)); // rough ETA
+  statusEl.textContent = `Driver ${driverId} — ${distance.toFixed(2)} km away (ETA ${etaMin} min)`;
+
+  if (autoCenter) {
+    const bounds = L.latLngBounds([driverPos, riderPos]);
+    map.fitBounds(bounds, { padding: [50, 50] });
+  }
+}
+
+// Clean up stored booking if server indicates booking no longer valid (optional improvement)
+// For example, if driver not found or booking cleared, driver might emit event to rider; not implemented server-side now.
+
+// On load, try to reconnect immediately (helps when page is reloaded)
+attemptReconnectStoredBooking();
+
+
+document.getElementById("trackBtn").addEventListener("click", () => {
+  const code = document.getElementById("bookingInput").value.trim();
+  if (!code) return alert("Please enter a booking code");
+  currentCode = code;
+  socket.emit("trackBooking", code); // get initial data
+});
+
+socket.on("trackFailed", msg => {
+  document.getElementById("message").innerText = msg;
+});
+
+socket.on("trackResult", info => {
+  document.getElementById("message").innerText =
+    `Driver: ${info.driverId}, Rider: ${info.riderId} (from ${info.source})`;
+
+  if (driverMarker) map.removeLayer(driverMarker);
+  if (riderMarker) map.removeLayer(riderMarker);
+
+  driverMarker = L.marker([info.driverLat, info.driverLng], { icon: makeIcon("blue") })
+    .addTo(map).bindPopup("Driver");
+
+  riderMarker = L.marker([info.riderLat, info.riderLng], { icon: makeIcons("green") })
+    .addTo(map).bindPopup("Rider");
+
+  const bounds = L.latLngBounds([
+    [info.driverLat, info.driverLng],
+    [info.riderLat, info.riderLng],
+  ]);
+  map.fitBounds(bounds);
+
+  // ✅ Start live tracking
+  socket.emit("trackLive", info.bookingCode);
+});
+
+// When driver moves
+socket.on("liveDriverUpdate", ({ lat, lng }) => {
+  if (driverMarker) driverMarker.setLatLng([lat, lng]);
+});
+
+// When rider moves
+socket.on("liveRiderUpdate", ({ lat, lng }) => {
+  if (riderMarker) riderMarker.setLatLng([lat, lng]);
+});
+
+// Utility: colored icon
+function makeIcon(color) {
+  return L.icon({
+    iconUrl: `https://img.icons8.com/?size=100&id=15127&format=png&color=000000`,
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+  });
+}
+
+function makeIcons(color) {
+  return L.icon({
+    iconUrl: `https://photo-cdn2.icons8.com/1EWiIsUSJ1QOSFsgrUpoJw_IYYRJ9svRHPFttQkDzuI/rs:fit:483:1072/wm:1:re:0:0:0.65/wmid:moose/q:98/czM6Ly9pY29uczgu/bW9vc2UtcHJvZC5h/c3NldHMvYXNzZXRz/L2VkaXRvci9tb2Rl/bC81MDUvNWZkNjkz/OGItZjBkYS00OWFk/LTkwMjEtMzg4ODFl/MjllYjg3LnBuZw.png`,
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+  });
+}
+
+</script>
+</body>
+</html>
