@@ -439,16 +439,16 @@
         <p>Track your vehicle’s exact position in real-time and broadcast updates to riders with advanced accuracy and low latency.</p>
         <button onclick="openLoginPopup()" class="btn">Driver Login</button>
       </div>
-
       <div class="card">
         <h3>🤖 AI Tracking</h3>
         <p>Powered by Node.js, Express & Socket.io, this AI module ensures efficient route prediction and smart ride synchronization.</p>
+        <button type="submit" class="btn" id="driverdel" value="Submit">Click here</button>
       </div>
     </div>
   </div>
    <div class="popup-overlay" id="popup">
     <div class="booking-form">
-      <button class="close-btn" onclick="c()">×</button>
+       <button onclick="c()">click here</button>
       <form id="registerForm">
         <label for="name">Name</label>
       <input type="text" id="name" name="name" placeholder="Enter the name" required />
@@ -475,46 +475,105 @@
   </footer>
 
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js" crossorigin="anonymous"></script>
-<script>
+<script type="module">
+
+  window.c=function() {
+    document.getElementById("popup").style.display = "none";
+  }
+
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+  import { getDatabase, ref, set, get, child, push, query, orderByChild, equalTo } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyARe_cDs_WHl7CkCJTjCEaTMFAksmi1SXg",
+    authDomain: "maps-41eca.firebaseapp.com",
+    databaseURL: "https://maps-41eca-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "maps-41eca",
+    storageBucket: "maps-41eca.firebasestorage.app",
+    messagingSenderId: "850870521671",
+    appId: "1:850870521671:web:6a986f4f81a6cb976b8662",
+    measurementId: "G-VDW9C5BWL3"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
   /*Driver information in the databases*/
-  document.getElementById("registerForm").addEventListener("submit", function (e) {
-      e.preventDefault();
+document.getElementById("registerForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
 
-      const name = document.getElementById("name").value;
-      const mobile = document.getElementById("mobile").value;
-      const gmail = document.getElementById("gmail").value;
-      const password = document.getElementById("password").value;
-      const conform = document.getElementById("conform").value;
+  const name = document.getElementById("name").value.trim();
+  const mobile = document.getElementById("mobile").value.trim();
+  const gmail = document.getElementById("gmail").value.trim();
+  const password = document.getElementById("password").value;
+  const conform = document.getElementById("conform").value;
+  const msg = document.getElementById("message");
 
-      if (password !== conform) {
-        document.getElementById("message").innerText = "Passwords do not match!";
-        return;
-      }
+  msg.innerText = "";
 
-fetch("/insert", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    name,
-    gmail,
-    password,
-    mobile,
-    role: "driver", // or "rider"
-  }),
-})
-  .then((res) => res.json())
-  .then((data) => {
-    document.getElementById("message").innerText = data.message;
+  // ✅ 1. Validate required fields
+  if (!name || !mobile || !gmail || !password || !conform) {
+    msg.innerText = "⚠️ All fields are required!";
+    return;
+  }
 
-    if (data.driver_id) {
-      localStorage.setItem("driverId", data.driver_id);
-      console.log("Driver registered with ID:", data.driver_id);
+  // ✅ 2. Check password match
+  if (password !== conform) {
+    msg.innerText = "⚠️ Passwords do not match!";
+    return;
+  }
+
+  try {
+    // ✅ 3. Check if Gmail already exists
+    const snapshot = await get(ref(db, "drivers"));
+    let exists = false;
+
+    snapshot.forEach(childSnap => {
+      if (childSnap.val().gmail === gmail) exists = true;
+    });
+
+    if (exists) {
+      msg.innerText = "⚠️ Gmail already registered!";
+      return;
     }
 
-    registerForm.reset();
-  })
-  .catch((err) => console.error(err));
-  });
+    // ✅ 4. Create new driver
+    const newDriverRef = push(ref(db, "drivers"));
+    await set(newDriverRef, {
+      id: newDriverRef.key,
+      name,
+      gmail,
+      password,
+      mobile,
+      online: 1,
+
+      // Rider 1 details
+      rider1_id: null,
+      booking1_code: null,
+      rider1_created_at: null,
+      rider1_lat: null,
+      rider1_lng: null,
+
+      // Rider 2 details
+      rider2_id: null,
+      booking2_code: null,
+      rider2_created_at: null,
+      rider2_lat: null,
+      rider2_lng: null,
+
+      // Driver location
+      lat: null,
+      lng: null,
+    });
+
+    msg.innerText = "✅ Driver registered successfully!";
+    localStorage.setItem("driverId", newDriverRef.key);
+    document.getElementById("registerForm").reset();
+  } catch (error) {
+    console.error("❌ Error registering driver:", error);
+    msg.innerText = "❌ Error registering driver!";
+  }
+});
+
   /*server sider languages connection*/
   const socket = io({
     reconnection: true,
@@ -556,6 +615,9 @@ fetch("/insert", {
     const popup = document.getElementById("popup");
     if(pickup==="Driverdanapur"&&destination==="chintukr@@123"){
      popup.style.display = "flex";
+      pickupInput.value = "";
+    destinationInput.value = "";
+     return ;
     }
     
     if (!pickup) {
@@ -576,95 +638,119 @@ fetch("/insert", {
     }
     updateDriverList();
   });
-  function c() {
-    document.getElementById("popup").style.display = "none";
-  }
   // 🧾 Display available drivers dynamically
-  function updateDriverList() {
-  driversList.innerHTML = '';
+    async function updateDriverList() {
+      const driversList = document.getElementById("driversList");
+      driversList.innerHTML = "";
 
-  // Filter drivers: show only those who have at least one empty rider slot
-  const unbooked = Object.entries(driversData).filter(([id, d]) => {
-    // Driver has rider1_id and rider2_id fields (sent from server)
-    const rider1 = d.rider1_id;
-    const rider2 = d.rider2_id;
+      try {
+        const snapshot = await get(ref(db, "drivers"));
+        if (!snapshot.exists()) {
+          driversList.innerHTML = "<p style='color:#888;'>No available drivers found.</p>";
+          return;
+        }
 
-    // Driver is available if at least one slot is empty
-    return !(rider1 && rider2); 
-  });
+        const drivers = [];
+        snapshot.forEach(childSnap => {
+          const d = childSnap.val();
+          if (d.online === 1) {
+            drivers.push({ id: childSnap.key, ...d });
+          }
+        });
 
-  if (unbooked.length === 0) {
-    driversList.innerHTML = '<p style="color:#888;">No available drivers nearby.</p>';
-    return;
-  }
+        if (drivers.length === 0) {
+          driversList.innerHTML = "<p style='color:#888;'>No available drivers found.</p>";
+          return;
+        }
 
-  unbooked.forEach(([id, d]) => {
-    const div = document.createElement('div');
-    div.className = 'driverItem';
-    div.innerHTML = `<span>🚗 Driver ID: ${id.substring(0, 6)}...</span>`;
+        drivers.forEach(d => {
+          const div = document.createElement("div");
+          div.className = "driverItem";
+          div.innerHTML = `<span>🚗 ${d.name} (${d.mobile})</span>`;
+          
+          const btn = document.createElement("button");
+          btn.textContent = "Book";
+          btn.onclick = () => bookDriver(d.id);
 
-    const btn = document.createElement('button');
-    btn.textContent = 'Book';
-    btn.onclick = () => {
-      socket.emit('bookDriver', id);
-      btn.disabled = true;
-      btn.textContent = 'Booking...';
-    };
-
-    div.appendChild(btn);
-    driversList.appendChild(div);
-  });
-}
-
-  // ✅ Booking Success
-  socket.on('bookingSuccess', ({ driverId ,bookingCode}) => {
-    const btn = [...document.querySelectorAll('.driverItem button')].find(
-      (b) => b.parentElement.textContent.includes(driverId.substring(0, 6))
-    );
-    if (btn) {
-      btn.textContent = 'Booked';
-      btn.disabled = true;
+          div.appendChild(btn);
+          driversList.appendChild(div);
+        });
+      } catch (error) {
+        console.error(error);
+        driversList.innerHTML = "<p style='color:red;'>Error loading drivers!</p>";
+      }
     }
-    alert(`✅ Driver ${bookingCode} booked successfully!`);
-  });
 
-  // ❌ Booking Failure
-  socket.on('bookingFailed', (msg) => {
-    alert(`❌ Booking failed: ${msg}`);
-    console.log("my name is chintu:",msg);
-  });
+    window.updateDriverList = updateDriverList;
 
-  function openLoginPopup() { document.getElementById("loginPopup").style.display = "flex"; }
-  function closePopup() {
-    document.getElementById("popup").style.display = "none";
+    // 🚕 Book Driver
+    function bookDriver(driverId) {
+      const pickup = document.getElementById("pickup").value.trim();
+      const destination = document.getElementById("destination").value.trim();
+
+      // Send booking request to backend
+      socket.emit("bookDriver", driverId);
+    }
+
+    // ✅ Booking Success
+    socket.on("bookingSuccess", ({ driverId, bookingCode }) => {
+      alert(`✅ Driver booked successfully!\nBooking Code: ${bookingCode}`);
+      const btn = [...document.querySelectorAll(".driverItem button")].find(
+        (b) => b.parentElement.textContent.includes(driverId.substring(0, 6))
+      );
+      if (btn) {
+        btn.textContent = "Booked";
+        btn.disabled = true;
+      }
+    });
+
+    // ❌ Booking Failed
+    socket.on("bookingFailed", (msg) => {
+      alert(`❌ Booking failed: ${msg}`);
+      console.log("Booking error:", msg);
+    });
+
+  window.openLoginPopup=function() { document.getElementById("loginPopup").style.display = "flex"; }
+  window.closePopup=function() {
     document.getElementById("loginPopup").style.display = "none";
   }
-function loginDriver() {
-  const gmail = document.getElementById("loginGmail").value.trim();
-  const password = document.getElementById("loginPassword").value.trim();
+  window.loginDriver = async function () {
+    const gmail = document.getElementById("loginGmail").value.trim();
+    const password = document.getElementById("loginPassword").value.trim();
+    const msg = document.getElementById("loginMessage");
 
-  if (!gmail || !password) {
-    document.getElementById("loginMessage").innerText = "Please fill all fields.";
-    return;
-  }
-
-  fetch("/loginDriver", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gmail, password }) // send as object
-  })
-  .then(res => res.json())
-  .then(data => {
-    if (data.success) {
-      localStorage.setItem("driverId", data.userId);
-      localStorage.setItem("driverName", data.name);
-      window.location.href = "/driver.html";
-    } else {
-      document.getElementById("loginMessage").innerText = data.message;
+    if (!gmail || !password) {
+      msg.innerText = "⚠️ Please fill all fields.";
+      return;
     }
-  })
-  .catch(err => console.error("Error during login:", err));
-}
+
+    try {
+      const snapshot = await get(ref(db, "drivers"));
+      let found = null;
+
+      snapshot.forEach(childSnap => {
+        const d = childSnap.val();
+        if (d.gmail === gmail && d.password === password) {
+          found = { id: childSnap.key, ...d };
+        }
+      });
+
+      if (found) {
+        msg.innerText = "✅ Login successful!";
+        localStorage.setItem("driverId", found.id);
+        localStorage.setItem("driverName", found.name);
+        window.location.href = "/driver.html";
+      } else {
+        msg.innerText = "❌ Invalid Gmail or Password!";
+      }
+    } catch (error) {
+      console.error(error);
+      msg.innerText = "⚠️ Login error!";
+    }
+  };
+  document.getElementById("driverdel").addEventListener("click", function() {
+  window.location.href = "driverdel.html"; // redirect to delete page
+});
 
 </script>
 <div class="popup-overlay" id="loginPopup">
