@@ -111,96 +111,143 @@
       });
     };
 
-    // 🔸 Open map popup for selected driver
-    async function openDriverMap(driverId) {
-      const snap = await get(ref(db, "drivers/" + driverId));
-      if (!snap.exists()) { alert("Driver not found"); return; }
-      const driver = snap.val();
+// 🔹 Open map popup for selected driver (LIVE UPDATES + AUTO ROUTE REFRESH)
+async function openDriverMap(driverId) {
+  const driverRef = ref(db, "drivers/" + driverId);
+  const snap = await get(driverRef);
+  if (!snap.exists()) {
+    alert("Driver not found");
+    return;
+  }
 
-      if (!driver.lat || !driver.lng) {
-        alert("Driver has no location (lat/lng) data.");
-        return;
-      }
+  const popup = document.getElementById("mapPopup");
+  popup.style.display = "flex";
+  const mapEl = document.getElementById("mapCanvas");
+  mapEl.innerHTML = "";
 
-      const popup = document.getElementById("mapPopup");
-      popup.style.display = "flex";
-      const mapEl = document.getElementById("mapCanvas");
-      mapEl.innerHTML = "";
+  const driver = snap.val();
 
-      const map = new google.maps.Map(mapEl, {
-        center: { lat: Number(driver.lat), lng: Number(driver.lng) },
-        zoom: 13,
-      });
+  const map = new google.maps.Map(mapEl, {
+    center: { lat: Number(driver.lat || 0), lng: Number(driver.lng || 0) },
+    zoom: 13,
+  });
 
-      const markers = [];
-      const renderers = [];
+  // Track all map objects
+  const markers = [];
+  let routeRenderers = [];
 
-      // Driver marker
-      const driverMarker = new google.maps.Marker({
-        position: { lat: Number(driver.lat), lng: Number(driver.lng) },
-        map,
-        title: driver.name || "Driver",
-        icon: "http://maps.google.com/mapfiles/ms/icons/green-dot.png"
-      });
-      markers.push(driverMarker);
+  // 🔹 Driver marker
+  const driverMarker = new google.maps.Marker({
+    position: { lat: Number(driver.lat || 0), lng: Number(driver.lng || 0) },
+    map,
+    title: driver.name || "Driver",
+    icon: "http://maps.google.com/mapfiles/ms/icons/green-dot.png",
+  });
+  markers.push(driverMarker);
 
-      const riderPoints = [];
-      if (driver.rider1_lat && driver.rider1_lng) {
-        riderPoints.push({ lat: Number(driver.rider1_lat), lng: Number(driver.rider1_lng), label: "Rider 1" });
-      }
-      if (driver.rider2_lat && driver.rider2_lng) {
-        riderPoints.push({ lat: Number(driver.rider2_lat), lng: Number(driver.rider2_lng), label: "Rider 2" });
-      }
+  // 🔹 Rider markers
+  const riderPoints = [];
+  if (driver.rider1_lat && driver.rider1_lng) {
+    riderPoints.push({
+      lat: Number(driver.rider1_lat),
+      lng: Number(driver.rider1_lng),
+      label: "Rider 1",
+    });
+  }
+  if (driver.rider2_lat && driver.rider2_lng) {
+    riderPoints.push({
+      lat: Number(driver.rider2_lat),
+      lng: Number(driver.rider2_lng),
+      label: "Rider 2",
+    });
+  }
 
-      riderPoints.forEach((rp) => {
-        const m = new google.maps.Marker({
-          position: { lat: rp.lat, lng: rp.lng },
-          map,
-          title: rp.label,
-          icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+  riderPoints.forEach((rp) => {
+    const m = new google.maps.Marker({
+      position: { lat: rp.lat, lng: rp.lng },
+      map,
+      title: rp.label,
+      icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+    });
+    markers.push(m);
+  });
+
+  const directionsService = new google.maps.DirectionsService();
+
+  // 🔹 Function to draw or update route lines
+  async function drawRoutes(currentDriver) {
+    // clear previous lines
+    routeRenderers.forEach((r) => r.setMap(null));
+    routeRenderers = [];
+
+    for (let i = 0; i < riderPoints.length; i++) {
+      const rp = riderPoints[i];
+      try {
+        const result = await directionsService.route({
+          origin: { lat: Number(currentDriver.lat), lng: Number(currentDriver.lng) },
+          destination: { lat: rp.lat, lng: rp.lng },
+          travelMode: google.maps.TravelMode.DRIVING,
         });
-        markers.push(m);
-      });
-
-      const directionsService = new google.maps.DirectionsService();
-      for (let i = 0; i < riderPoints.length; ++i) {
-        const rp = riderPoints[i];
-        try {
-          const result = await directionsService.route({
-            origin: { lat: Number(driver.lat), lng: Number(driver.lng) },
-            destination: { lat: rp.lat, lng: rp.lng },
-            travelMode: google.maps.TravelMode.DRIVING,
-            unitSystem: google.maps.UnitSystem.METRIC
-          });
-          const renderer = new google.maps.DirectionsRenderer({
-            map,
-            directions: result,
-            suppressMarkers: true,
-            preserveViewport: true,
-            polylineOptions: {
-              strokeColor: i === 0 ? "#0078ff" : "#ff4081",
-              strokeOpacity: 0.95,
-              strokeWeight: 6,
-              icons: [{
-                icon: { path: google.maps.SymbolPath.FORWARD_OPEN_ARROW },
-                offset: '25px',
-                repeat: '50px'
-              }]
-            }
-          });
-          renderers.push(renderer);
-        } catch (err) {
-          console.error("Directions error:", err);
-        }
+        const renderer = new google.maps.DirectionsRenderer({
+          map,
+          directions: result,
+          suppressMarkers: true,
+          preserveViewport: true,
+          polylineOptions: {
+            strokeColor: i === 0 ? "#0078ff" : "#ff4081",
+            strokeWeight: 5,
+            strokeOpacity: 0.9,
+          },
+        });
+        routeRenderers.push(renderer);
+      } catch (err) {
+        console.error("Directions error:", err);
       }
-
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend({ lat: Number(driver.lat), lng: Number(driver.lng) });
-      riderPoints.forEach(rp => bounds.extend({ lat: rp.lat, lng: rp.lng }));
-      if (riderPoints.length === 0) map.setZoom(15); else map.fitBounds(bounds);
-
-      popup._mapObjects = { markers, renderers, map };
     }
+  }
+
+  // 🔹 Initial draw
+  await drawRoutes(driver);
+
+  // 🔹 Adjust view
+  const bounds = new google.maps.LatLngBounds();
+  bounds.extend({ lat: Number(driver.lat), lng: Number(driver.lng) });
+  riderPoints.forEach((rp) => bounds.extend({ lat: rp.lat, lng: rp.lng }));
+  if (riderPoints.length === 0) map.setZoom(15);
+  else map.fitBounds(bounds);
+
+  // 🔹 LIVE UPDATES (auto update route + driver position)
+  const unsubscribe = onValue(driverRef, async (snap) => {
+    if (!snap.exists()) return;
+    const updated = snap.val();
+
+    if (!updated.lat || !updated.lng) return;
+    const pos = { lat: Number(updated.lat), lng: Number(updated.lng) };
+    driverMarker.setPosition(pos);
+
+    // ✅ Auto update route on driver move
+    await drawRoutes(updated);
+  });
+
+  // Cleanup reference
+  popup._mapObjects = { markers, map, unsubscribe, routeRenderers };
+}
+
+window.closeMapPopup = function () {
+  const popup = document.getElementById("mapPopup");
+  if (!popup) return;
+  const data = popup._mapObjects;
+
+  if (data) {
+    if (data.markers) data.markers.forEach((m) => m.setMap(null));
+    if (data.routeRenderers)
+      data.routeRenderers.forEach((r) => r.setMap && r.setMap(null));
+    if (data.unsubscribe) data.unsubscribe();
+    popup._mapObjects = null;
+  }
+
+  popup.style.display = "none";
+};
 
     // 🔸 Close map popup
     window.closeMapPopup = function () {
