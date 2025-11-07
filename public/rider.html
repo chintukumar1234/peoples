@@ -56,8 +56,28 @@ toggleBtn.addEventListener("click", () => {
 
 const socket = io({ reconnection:true, reconnectionAttempts: Infinity, transports: ['websocket','polling'] });
 
-const map = L.map('map').setView([0,0],13);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+const map = L.map('map').setView([0, 0], 13);
+
+// base layers
+const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap contributors'
+});
+
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19,
+  attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+});
+
+// add default
+streetLayer.addTo(map);
+
+// add layer control
+L.control.layers({
+  "Street Map": streetLayer,
+  "Satellite": satelliteLayer
+}).addTo(map);
+
 
 const statusEl = document.getElementById('status');
 const speedEl = document.getElementById('speed');

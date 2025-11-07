@@ -496,7 +496,33 @@
   };
 
   const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
+const db = getDatabase(app);
+
+// ✅ Make all drivers stay online = 1 whenever page is open
+import { update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+async function setDriversOnline() {
+  try {
+    const snapshot = await get(ref(db, "drivers"));
+    if (!snapshot.exists()) return;
+
+    snapshot.forEach(async (childSnap) => {
+      const driverRef = ref(db, `drivers/${childSnap.key}`);
+      await update(driverRef, { online: 1 });
+    });
+
+    console.log("✅ All drivers set to online: 1");
+  } catch (error) {
+    console.error("❌ Error updating online status:", error);
+  }
+}
+
+// Run this when page loads
+window.addEventListener("load", setDriversOnline);
+
+// Optional: keep refreshing online status every 30 seconds (to ensure always true)
+setInterval(setDriversOnline, 30000);
+
   /*Driver information in the databases*/
 document.getElementById("registerForm").addEventListener("submit", async (e) => {
   e.preventDefault();
