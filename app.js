@@ -1,509 +1,454 @@
-// app.js
-const express = require("express");
-const mysql = require("mysql");
-const http = require("http");
-const { Server } = require("socket.io");
-const path = require("path");
-
+import express from "express";
+import http from "http";
+import { Server } from "socket.io";
+import bodyParser from "body-parser";
+import cors from "cors";
+import { initializeApp } from "firebase/app";
+import path from "path";
+import { fileURLToPath } from "url";
+import {
+  getDatabase,
+  ref,
+  set,
+  get,
+  push,
+  update,
+  child,
+  onValue
+} from "firebase/database";
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
-});
+// --------------------
+// 🔥 Firebase Config
+// --------------------
+const firebaseConfig = {
+  apiKey: "AIzaSyARe_cDs_WHl7CkCJTjCEaTMFAksmi1SXg",
+  authDomain: "maps-41eca.firebaseapp.com",
+  databaseURL:
+    "https://maps-41eca-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "maps-41eca",
+  storageBucket: "maps-41eca.firebasestorage.app",
+  messagingSenderId: "850870521671",
+  appId: "1:850870521671:web:6a986f4f81a6cb976b8662",
+  measurementId: "G-VDW9C5BWL3",
+};
 
-// --------------------
-// MySQL Connection
-// --------------------
-const con = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "1234",
-  database: "student",
-});
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
 
-con.connect((err) => {
-  if (err) console.error("❌ MySQL connection error:", err);
-  else console.log("✅ MySQL connected");
-});
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// --------------------
-// Middleware & static
-// --------------------
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// 👇 Serve all files from the "public" folder
 app.use(express.static(path.join(__dirname, "public")));
+
+// Optional: Handle default route (serves index.html automatically)
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+// --------------------
+// Express + Socket.IO Setup
+// --------------------
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
+app.use(cors());
+app.use(bodyParser.json());
 
 // --------------------
 // In-memory state
 // --------------------
-// drivers: map driverId -> { lat, lng, online, socketId, rider1_id, rider2_id, rider1_lat, rider1_lng, rider2_lat, rider2_lng, speed, accuracy }
-// riders: map riderSocketId -> { lat, lng, speed, accuracy, ts }
 let drivers = {};
 let riders = {};
 
 // --------------------
-// Helper: sanitize drivers for broadcasting to riders
+// Helper
 // --------------------
 function sanitizeDriversForBroadcast(driversObj) {
   const out = {};
   for (const id in driversObj) {
     const d = driversObj[id] || {};
-
-    // Build an array of riders that are booked
     const bookedBy = [];
     if (d.rider1_id) bookedBy.push(d.rider1_id);
     if (d.rider2_id) bookedBy.push(d.rider2_id);
-
     out[id] = {
       lat: d.lat ?? null,
       lng: d.lng ?? null,
       online: !!d.online,
-      bookedBy, // now it's an array, not boolean
+      bookedBy,
       speed: d.speed ?? null,
-      accuracy: d.accuracy ?? null
+      accuracy: d.accuracy ?? null,
     };
   }
   return out;
 }
 
-
 // --------------------
-// REST endpoints
+// REST API Endpoints
 // --------------------
 
-// Insert driver (for testing / admin)
-app.post("/insert", (req, res) => {
-  const { name, gmail, password, mobile } = req.body;
-  if (!name || !gmail || !password || !mobile) return res.json({ message: "All fields are required!" });
+// Insert driver
+app.post("/insert", async (req, res) => {
+  try {
+    const { name, gmail, password, mobile } = req.body;
 
-  const sql = `INSERT INTO driver (name, gmail, password, mobile) VALUES (?, ?, ?, ?)`;
-  con.query(sql, [name, gmail, password, mobile], (err, result) => {
-    if (err) {
-      console.error("DB insert error:", err);
-      return res.json({ message: "Database error!" });
+    if (!name || !gmail || !password || !mobile) {
+      return res.status(400).json({ message: "All fields are required!" });
     }
-    res.json({ message: "Driver added!", userId: result.insertId });
-  });
+
+    // Create new driver entry with default fields
+    const newDriverRef = push(ref(db, "drivers"));
+    await set(newDriverRef, {
+      name,
+      gmail,
+      password,
+      mobile,
+      online: 1,
+
+      // Rider 1 details
+      rider1_id: null,
+      booking1_code: null,
+      rider1_created_at: null,
+      rider1_lat: null,
+      rider1_lng: null,
+
+      // Rider 2 details
+      rider2_id: null,
+      booking2_code: null,
+      rider2_created_at: null,
+      rider2_lat: null,
+      rider2_lng: null,
+
+      // Driver location
+      lat: null,
+      lng: null,
+    });
+
+    res.json({
+      message: "✅ Driver added successfully!",
+      driverId: newDriverRef.key,
+    });
+  } catch (error) {
+    console.error("❌ Error adding driver:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
 });
 
 // Driver login
-app.post("/loginDriver", (req, res) => {
+app.post("/loginDriver", async (req, res) => {
   const { gmail, password } = req.body;
-  if (!gmail || !password) return res.json({ success: false, message: "All fields are required!" });
+  if (!gmail || !password)
+    return res.json({ success: false, message: "All fields are required!" });
 
-  const sql = "SELECT * FROM driver WHERE TRIM(gmail)=? AND TRIM(password)=?";
-  con.query(sql, [gmail, password], (err, results) => {
-    if (err) {
-      console.error("DB login error:", err);
-      return res.json({ success: false, message: "Database error!" });
+  const snapshot = await get(ref(db, "drivers"));
+  if (snapshot.exists()) {
+    const driversData = snapshot.val();
+    for (const id in driversData) {
+      const d = driversData[id];
+      if (d.gmail.trim() === gmail.trim() && d.password.trim() === password.trim()) {
+        return res.json({
+          success: true,
+          message: "Login successful!",
+          userId: id,
+          name: d.name,
+        });
+      }
     }
-    if (results.length > 0) {
-      const user = results[0];
-      res.json({ success: true, message: "Login successful!", userId: user.id, name: user.name });
-    } else {
-      res.json({ success: false, message: "Invalid Gmail or Password!" });
-    }
-  });
-});
-
-// Reconnect rider (used by rider client to check stored booking)
-app.post("/reconnectRider", (req, res) => {
-  const { driverId, bookingCode } = req.body;
-  if (!driverId || !bookingCode) return res.json({ success: false });
-
-  const sql = `SELECT * FROM driver WHERE id=? AND (booking1_code=? OR booking2_code=?)`;
-  con.query(sql, [driverId, bookingCode, bookingCode], (err, result) => {
-    if (err) {
-      console.error("DB reconnect error:", err);
-      return res.json({ success: false });
-    }
-    if (!result || result.length === 0) return res.json({ success: false });
-    // return the stored rider lat/lng if available
-    const row = result[0];
-    res.json({ success: true, rider1_id: row.rider1_id, rider1_lat: row.rider1_lat, rider1_lng: row.rider1_lng, rider2_id: row.rider2_id, rider2_lat: row.rider2_lat, rider2_lng: row.rider2_lng });
-  });
-});
-
-// Target / finish ride (driver UI calls to clear booking using booking code)
-app.post("/target", (req, res) => {
-  const { bookingCode } = req.body;
-
-  if (!bookingCode) {
-    return res.status(400).json({ error: "Missing booking code" });
   }
-
-  const sql1 = `
-    UPDATE driver 
-    SET rider1_id = NULL, 
-        booking1_code = NULL, 
-        rider1_created_at = NULL, 
-        rider1_lat = NULL, 
-        rider1_lng = NULL 
-    WHERE booking1_code = ?`;
-
-  const sql2 = `
-    UPDATE driver 
-    SET rider2_id = NULL, 
-        booking2_code = NULL, 
-        rider2_created_at = NULL, 
-        rider2_lat = NULL, 
-        rider2_lng = NULL 
-    WHERE booking2_code = ?`;
-
-  con.query(sql1, [bookingCode], (err, result1) => {
-    if (err) {
-      console.error("DB error (booking1):", err);
-      return res.status(500).json({ error: "Database error (booking1)" });
-    }
-
-    if (result1.affectedRows > 0) {
-      console.log("✅ Cleared booking1 data");
-      // also clear in-memory drivers state where matching booking exists
-      for (const id in drivers) {
-        if (drivers[id] && drivers[id].booking1_code === bookingCode) {
-          drivers[id].rider1_id = null;
-          drivers[id].booking1_code = null;
-          drivers[id].rider1_lat = null;
-          drivers[id].rider1_lng = null;
-        }
-      }
-      return res.json({ message: "Booking 1 cleared successfully!" });
-    }
-
-    con.query(sql2, [bookingCode], (err, result2) => {
-      if (err) {
-        console.error("DB error (booking2):", err);
-        return res.status(500).json({ error: "Database error (booking2)" });
-      }
-
-      if (result2.affectedRows > 0) {
-        console.log("✅ Cleared booking2 data");
-        for (const id in drivers) {
-          if (drivers[id] && drivers[id].booking2_code === bookingCode) {
-            drivers[id].rider2_id = null;
-            drivers[id].booking2_code = null;
-            drivers[id].rider2_lat = null;
-            drivers[id].rider2_lng = null;
-          }
-        }
-        return res.json({ message: "Booking 2 cleared successfully!" });
-      }
-
-      console.log("⚠️ No matching booking found");
-      res.json({ message: "No booking found for this code" });
-    });
-  });
+  res.json({ success: false, message: "Invalid Gmail or Password!" });
 });
 
-// Update online flag from driver client
-app.post("/updateOnline", (req, res) => {
+// Update driver online status
+app.post("/updateOnline", async (req, res) => {
   const { userId, online } = req.body;
-  if (!userId) return res.status(400).json({ success: false, message: "Missing userId" });
+  if (!userId)
+    return res
+      .status(400)
+      .json({ success: false, message: "Missing userId" });
 
-  const val = online ? 1 : 0;
-  con.query("UPDATE driver SET online=? WHERE id=?", [val, userId], (err) => {
-    if (err) {
-      console.error("DB error updating online:", err);
-      return res.status(500).json({ success: false, message: "DB error" });
-    }
-    if (drivers[userId]) drivers[userId].online = val;
-    return res.json({ success: true });
-  });
+  await update(ref(db, `drivers/${userId}`), { online: online ? 1 : 0 });
+  res.json({ success: true });
 });
 
+app.post("/target", async (req, res) => {
+  try {
+    const { bookingCode } = req.body;
+
+    if (!bookingCode)
+      return res.status(400).json({ message: "Booking code is required!" });
+
+    const driversRef = ref(db, "drivers");
+    const snapshot = await get(driversRef);
+
+    if (!snapshot.exists())
+      return res.status(404).json({ message: "No drivers found!" });
+
+    let cleared = false;
+
+    snapshot.forEach((child) => {
+      const driver = child.val();
+      const driverRef = ref(db, `drivers/${child.key}`);
+
+      // Match booking code with either booking1_code or booking2_code
+      if (driver.booking1_code === bookingCode) {
+        update(driverRef, {
+          booking1_code: null,
+          rider1_id: null,
+          rider1_created_at: null,
+          rider1_lat: null,
+          rider1_lng: null,
+        });
+        cleared = true;
+      } else if (driver.booking2_code === bookingCode) {
+        update(driverRef, {
+          booking2_code: null,
+          rider2_id: null,
+          rider2_created_at: null,
+          rider2_lat: null,
+          rider2_lng: null,
+        });
+        cleared = true;
+      }
+    });
+
+    if (cleared) {
+      res.json({ message: "Booking cleared successfully!" });
+    } else {
+      res.status(404).json({ message: "No matching booking code found!" });
+    }
+  } catch (err) {
+    console.error("❌ Error clearing booking:", err);
+    res.status(500).json({ message: "Server error clearing booking!" });
+  }
+});
 // --------------------
-// Socket.IO realtime
+// Socket.IO Realtime Events
 // --------------------
 io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id);
 
-  // Register driver (sent from driver client on connect)
-  socket.on("registerDriver", ({ driverId }) => {
+  socket.on("trackBooking", async (bookingCode) => {
+    try {
+      const snapshot = await get(ref(db, "drivers"));
+      let found = false;
+
+      snapshot.forEach((child) => {
+        const driver = child.val();
+
+        // Match booking1 or booking2 code
+        if (driver.booking1_code === bookingCode || driver.booking2_code === bookingCode) {
+          found = true;
+          const info = {
+            driverId: child.key,
+            driverLat: driver.lat,
+            driverLng: driver.lng,
+            riderId:
+              driver.booking1_code === bookingCode
+                ? driver.rider1_id
+                : driver.rider2_id,
+            riderLat:
+              driver.booking1_code === bookingCode
+                ? driver.rider1_lat
+                : driver.rider2_lat,
+            riderLng:
+              driver.booking1_code === bookingCode
+                ? driver.rider1_lng
+                : driver.rider2_lng,
+            bookingCode,
+            source:
+              driver.booking1_code === bookingCode
+                ? "rider1"
+                : "rider2",
+          };
+
+          // Send back data to frontend
+          socket.emit("trackResult", info);
+
+          // ✅ Now start live updates
+          socket.emit("trackLive", bookingCode);
+        }
+      });
+
+      if (!found) socket.emit("trackFailed", "❌ Invalid booking code!");
+    } catch (err) {
+      console.error("trackBooking error:", err);
+      socket.emit("trackFailed", "❌ Server error tracking booking!");
+    }
+  });
+
+  // 🟢 2. Live tracking listener
+  socket.on("trackLive", async (bookingCode) => {
+    const driversRef = ref(db, "drivers");
+    onValue(driversRef, (snapshot) => {
+      snapshot.forEach((child) => {
+        const d = child.val();
+
+        // When driver or rider moves, send updates
+        if (d.booking1_code === bookingCode) {
+          io.to(socket.id).emit("liveDriverUpdate", { lat: d.lat, lng: d.lng });
+          io.to(socket.id).emit("liveRiderUpdate", {
+            lat: d.rider1_lat,
+            lng: d.rider1_lng,
+          });
+        } else if (d.booking2_code === bookingCode) {
+          io.to(socket.id).emit("liveDriverUpdate", { lat: d.lat, lng: d.lng });
+          io.to(socket.id).emit("liveRiderUpdate", {
+            lat: d.rider2_lat,
+            lng: d.rider2_lng,
+          });
+        }
+      });
+    });
+  });
+
+  // Register driver
+  socket.on("registerDriver", async ({ driverId }) => {
     if (!driverId) return;
     socket.driverId = driverId;
-    drivers[driverId] = drivers[driverId] || { bookedBy: null, online: 1 };
-    drivers[driverId].socketId = socket.id;
-    drivers[driverId].online = 1;
 
-    // Load last known data from DB
-    con.query("SELECT * FROM driver WHERE id=?", [driverId], (err, results) => {
-      if (!err && results && results.length > 0) {
-        const d = results[0];
-        drivers[driverId].lat = d.lat;
-        drivers[driverId].lng = d.lng;
-        drivers[driverId].rider1_id = d.rider1_id;
-        drivers[driverId].rider2_id = d.rider2_id;
-        drivers[driverId].rider1_lat = d.rider1_lat;
-        drivers[driverId].rider1_lng = d.rider1_lng;
-        drivers[driverId].rider2_lat = d.rider2_lat;
-        drivers[driverId].rider2_lng = d.rider2_lng;
-        drivers[driverId].booking1_code = d.booking1_code;
-        drivers[driverId].booking2_code = d.booking2_code;
-        drivers[driverId].bookedBy = !!(d.rider1_id || d.rider2_id);
+    // Load from Firebase
+    const snap = await get(ref(db, `drivers/${driverId}`));
+    if (snap.exists()) {
+      const d = snap.val();
+      drivers[driverId] = {
+        socketId: socket.id,
+        online: 1,
+        lat: d.lat,
+        lng: d.lng,
+        rider1_id: d.rider1_id,
+        rider2_id: d.rider2_id,
+        booking1_code: d.booking1_code,
+        booking2_code: d.booking2_code,
+        rider1_lat: d.rider1_lat,
+        rider1_lng: d.rider1_lng,
+        rider2_lat: d.rider2_lat,
+        rider2_lng: d.rider2_lng,
+      };
 
-        // If driver has active riders, notify them (driver UI needs bookingConfirmed)
-        if (d.rider1_id) socket.emit("bookingConfirmed", {
+      // Send bookings back if any active
+      if (d.rider1_id)
+        socket.emit("bookingConfirmed", {
           riderId: d.rider1_id,
           lat: d.rider1_lat,
           lng: d.rider1_lng,
-          bookingCode: d.booking1_code || null, // ✅ added
+          bookingCode: d.booking1_code,
         });
 
-        if (d.rider2_id) socket.emit("bookingConfirmed", {
+      if (d.rider2_id)
+        socket.emit("bookingConfirmed", {
           riderId: d.rider2_id,
           lat: d.rider2_lat,
           lng: d.rider2_lng,
-          bookingCode: d.booking2_code || null, // ✅ added
+          bookingCode: d.booking2_code,
         });
-      }
-    });
+    }
   });
 
-  // Driver shares location
-  socket.on("driverLocation", ({ lat, lng, speed, accuracy }) => {
+  // Driver location update
+  socket.on("driverLocation", async ({ lat, lng, speed, accuracy }) => {
     const id = socket.driverId;
     if (!id) return;
-    drivers[id] = { ...drivers[id], lat, lng, speed, accuracy, online: 1, socketId: socket.id };
-    // Persist driver location to DB (non-blocking)
-    con.query("UPDATE driver SET lat=?, lng=? WHERE id=?", [lat, lng, id], (err) => {
-      if (err) console.error("DB update driver location error:", err);
-    });
+    drivers[id] = { ...drivers[id], lat, lng, speed, accuracy, online: 1 };
+    await update(ref(db, `drivers/${id}`), { lat, lng });
   });
 
-  // Rider shares location
-  socket.on("riderLocation", (pos) => {
-    // pos should have lat,lng,speed,accuracy,ts optionally
+  // Rider location update
+  socket.on("riderLocation", async (pos) => {
     riders[socket.id] = { ...pos, id: socket.id };
+    const driverId = Object.keys(drivers).find(
+      (d) =>
+        drivers[d] &&
+        (drivers[d].rider1_id === socket.id ||
+          drivers[d].rider2_id === socket.id)
+    );
+    if (!driverId) return;
+    const driver = drivers[driverId];
 
-    // Find driver who has booked this rider (in-memory)
-    const driverId = Object.keys(drivers).find(d => drivers[d] && (drivers[d].rider1_id === socket.id || drivers[d].rider2_id === socket.id));
-    if (driverId) {
-      let colLat = "", colLng = "";
-      if (drivers[driverId].rider1_id === socket.id) { colLat = "rider1_lat"; colLng = "rider1_lng"; }
-      else { colLat = "rider2_lat"; colLng = "rider2_lng"; }
+    let latKey = "",
+      lngKey = "";
+    if (driver.rider1_id === socket.id) {
+      latKey = "rider1_lat";
+      lngKey = "rider1_lng";
+    } else {
+      latKey = "rider2_lat";
+      lngKey = "rider2_lng";
+    }
 
-      // Update DB for rider lat/lng
-      con.query(`UPDATE driver SET ${colLat}=?, ${colLng}=? WHERE id=?`, [pos.lat, pos.lng, driverId], (err) => {
-        if (err) console.error("DB update rider position error:", err);
+    await update(ref(db, `drivers/${driverId}`), {
+      [latKey]: pos.lat,
+      [lngKey]: pos.lng,
+    });
+
+    driver[latKey] = pos.lat;
+    driver[lngKey] = pos.lng;
+
+    if (driver.socketId) {
+      io.to(driver.socketId).emit("riderPositionUpdate", {
+        riderId: socket.id,
+        lat: pos.lat,
+        lng: pos.lng,
       });
-
-      // Update in-memory
-      if (drivers[driverId]) {
-        if (drivers[driverId].rider1_id === socket.id) {
-          drivers[driverId].rider1_lat = pos.lat;
-          drivers[driverId].rider1_lng = pos.lng;
-        } else {
-          drivers[driverId].rider2_lat = pos.lat;
-          drivers[driverId].rider2_lng = pos.lng;
-        }
-      }
-
-      // emit to the specific driver socket
-      if (drivers[driverId] && drivers[driverId].socketId) {
-        io.to(drivers[driverId].socketId).emit("riderPositionUpdate", { riderId: socket.id, lat: pos.lat, lng: pos.lng });
-      }
     }
   });
 
-  socket.on("bookDriver", (driverId) => {
-  const driver = drivers[driverId];
-  const rider = riders[socket.id];
-  if (!driver) return socket.emit("bookingFailed", "Driver not found");
-  if (!rider) return socket.emit("bookingFailed", "Your location not found. Wait for GPS and try again.");
+  // Rider books driver
+  socket.on("bookDriver", async (driverId) => {
+    const driver = drivers[driverId];
+    const rider = riders[socket.id];
+    if (!driver)
+      return socket.emit("bookingFailed", "Driver not found or offline");
+    if (!rider)
+      return socket.emit(
+        "bookingFailed",
+        "Your location not found. Wait for GPS and try again."
+      );
 
-  // ✅ If driver1 is booked, then book rider2 automatically
-  let slot;
-  if (!driver.rider1_id) slot = "rider1_id";
-  else if (!driver.rider2_id) slot = "rider2_id";
-  else return socket.emit("bookingFailed", "Driver full");
+    let slot;
+    if (!driver.rider1_id) slot = "rider1_id";
+    else if (!driver.rider2_id) slot = "rider2_id";
+    else return socket.emit("bookingFailed", "Driver full");
 
-  const bookingSlot = slot === "rider1_id" ? "booking1_code" : "booking2_code";
-  const createdSlot = slot === "rider1_id" ? "rider1_created_at" : "rider2_created_at";
-  const driverLatCol = slot === "rider1_id" ? "rider1_lat" : "rider2_lat";
-  const driverLngCol = slot === "rider1_id" ? "rider1_lng" : "rider2_lng";
-  const bookingCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const bookingSlot = slot === "rider1_id" ? "booking1_code" : "booking2_code";
+    const latCol = slot === "rider1_id" ? "rider1_lat" : "rider2_lat";
+    const lngCol = slot === "rider1_id" ? "rider1_lng" : "rider2_lng";
+    const bookingCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-  // Update database with booking info
-  const sql = `UPDATE driver SET ${slot}=?, ${bookingSlot}=?, ${createdSlot}=NOW(), ${driverLatCol}=?, ${driverLngCol}=? WHERE id=?`;
-  con.query(sql, [socket.id, bookingCode, rider.lat || null, rider.lng || null, driverId], (err) => {
-    if (err) {
-      console.error("DB error booking:", err);
-      return socket.emit("bookingFailed", "Database error");
-    }
+    await update(ref(db, `drivers/${driverId}`), {
+      [slot]: socket.id,
+      [bookingSlot]: bookingCode,
+      [latCol]: rider.lat || null,
+      [lngCol]: rider.lng || null,
+      online: 1,
+    });
 
-    // Update in-memory driver state
-    drivers[driverId] = drivers[driverId] || {};
     drivers[driverId][slot] = socket.id;
     drivers[driverId][bookingSlot] = bookingCode;
-    drivers[driverId][driverLatCol] = rider.lat || null;
-    drivers[driverId][driverLngCol] = rider.lng || null;
-    drivers[driverId].bookedBy = !!(drivers[driverId].rider1_id || drivers[driverId].rider2_id);
+    drivers[driverId][latCol] = rider.lat;
+    drivers[driverId][lngCol] = rider.lng;
 
-    // Notify rider and driver
     socket.emit("bookingSuccess", { driverId, bookingCode, slot });
 
-    // ✅ Send to driver with bookingCode
-    if (drivers[driverId].socketId) {
-      io.to(drivers[driverId].socketId).emit("bookingConfirmed", {
+    if (driver.socketId) {
+      io.to(driver.socketId).emit("bookingConfirmed", {
         riderId: socket.id,
         lat: rider.lat,
         lng: rider.lng,
-        bookingCode// include bookingCode here
+        bookingCode,
       });
     }
   });
-});
 
-// ✅ Track driver & rider using booking code (DB + memory fallback)
-socket.on("trackBooking", (bookingCode) => {
-  if (!bookingCode) return socket.emit("trackFailed", "Booking code missing");
-
-  // First, try from in-memory (fastest)
-  let foundDriverId = Object.keys(drivers).find(d => {
-    const drv = drivers[d];
-    return drv && (drv.booking1_code === bookingCode || drv.booking2_code === bookingCode);
-  });
-
-  if (foundDriverId) {
-    const driver = drivers[foundDriverId];
-    let riderId, riderLat, riderLng;
-    if (driver.booking1_code === bookingCode) {
-      riderId = driver.rider1_id;
-      riderLat = driver.rider1_lat;
-      riderLng = driver.rider1_lng;
-    } else {
-      riderId = driver.rider2_id;
-      riderLat = driver.rider2_lat;
-      riderLng = driver.rider2_lng;
-    }
-
-    socket.emit("trackResult", {
-      driverId: foundDriverId,
-      driverLat: driver.lat,
-      driverLng: driver.lng,
-      riderId,
-      riderLat,
-      riderLng,
-      bookingCode,
-      source: "memory"
-    });
-    return;
-  }
-
-  // 🔍 If not in memory, search database
-  const sql = `
-    SELECT id AS driverId, lat AS driverLat, lng AS driverLng,
-           rider1_id, rider1_lat, rider1_lng, booking1_code,
-           rider2_id, rider2_lat, rider2_lng, booking2_code
-    FROM driver
-    WHERE booking1_code = ? OR booking2_code = ?
-    LIMIT 1
-  `;
-  con.query(sql, [bookingCode, bookingCode], (err, results) => {
-    if (err) {
-      console.error("DB track error:", err);
-      return socket.emit("trackFailed", "Database error");
-    }
-
-    if (!results || results.length === 0) {
-      return socket.emit("trackFailed", "Booking not found");
-    }
-
-    const d = results[0];
-    let riderId, riderLat, riderLng;
-    if (d.booking1_code === bookingCode) {
-      riderId = d.rider1_id;
-      riderLat = d.rider1_lat;
-      riderLng = d.rider1_lng;
-    } else {
-      riderId = d.rider2_id;
-      riderLat = d.rider2_lat;
-      riderLng = d.rider2_lng;
-    }
-
-    // Send response
-    socket.emit("trackResult", {
-      driverId: d.driverId,
-      driverLat: d.driverLat,
-      driverLng: d.driverLng,
-      riderId,
-      riderLat,
-      riderLng,
-      bookingCode,
-      source: "database"
-    });
-  });
-});
-// ✅ Live tracking by booking code
-socket.on("trackLive", (bookingCode) => {
-  if (!bookingCode) return;
-
-  // Store mapping: which socket is tracking which booking
-  socket.trackingBookingCode = bookingCode;
-  console.log("📡 Tracking live for code:", bookingCode);
-});
-
-// ✅ When driver updates location — also send to any trackers
-socket.on("driverLocation", ({ lat, lng, speed, accuracy }) => {
-  const id = socket.driverId;
-  if (!id) return;
-  drivers[id] = { ...drivers[id], lat, lng, speed, accuracy, online: 1, socketId: socket.id };
-
-  // Update DB
-  con.query("UPDATE driver SET lat=?, lng=? WHERE id=?", [lat, lng, id], (err) => {
-    if (err) console.error("DB update driver location error:", err);
-  });
-
-  // ✅ Send to all clients who are tracking this driver's booking(s)
-  io.sockets.sockets.forEach((client) => {
-    const code = client.trackingBookingCode;
-    if (!code) return;
-    const d = drivers[id];
-    if (d && (d.booking1_code === code || d.booking2_code === code)) {
-      client.emit("liveDriverUpdate", { lat, lng, driverId: id });
+  // Driver disconnect
+  socket.on("disconnect", async () => {
+    console.log("🔴 Socket disconnected:", socket.id);
+    if (socket.driverId) {
+      await update(ref(db, `drivers/${socket.driverId}`), { online: 0 });
+      delete drivers[socket.driverId];
     }
   });
-});
-
-// ✅ When rider updates location — also send to any trackers
-socket.on("riderLocation", (pos) => {
-  riders[socket.id] = { ...pos, id: socket.id };
-
-  const driverId = Object.keys(drivers).find(d => drivers[d] && 
-    (drivers[d].rider1_id === socket.id || drivers[d].rider2_id === socket.id)
-  );
-  if (!driverId) return;
-
-  const driver = drivers[driverId];
-  let colLat = "", colLng = "";
-  if (driver.rider1_id === socket.id) { colLat = "rider1_lat"; colLng = "rider1_lng"; }
-  else { colLat = "rider2_lat"; colLng = "rider2_lng"; }
-
-  con.query(`UPDATE driver SET ${colLat}=?, ${colLng}=? WHERE id=?`, [pos.lat, pos.lng, driverId], (err) => {
-    if (err) console.error("DB update rider position error:", err);
-  });
-
-  driver[colLat] = pos.lat;
-  driver[colLng] = pos.lng;
-
-  if (driver.socketId) {
-    io.to(driver.socketId).emit("riderPositionUpdate", { riderId: socket.id, lat: pos.lat, lng: pos.lng });
-  }
-
-  // ✅ Notify all tracking clients
-  io.sockets.sockets.forEach((client) => {
-    const code = client.trackingBookingCode;
-    if (!code) return;
-    if (driver.booking1_code === code || driver.booking2_code === code) {
-      client.emit("liveRiderUpdate", { lat: pos.lat, lng: pos.lng, riderId: socket.id });
-    }
-  });
-});
-
 });
 
 // --------------------
-// Broadcast sanitized drivers periodically
+// Broadcast to Riders Periodically
 // --------------------
 setInterval(() => {
   const payload = sanitizeDriversForBroadcast(drivers);
@@ -511,7 +456,9 @@ setInterval(() => {
 }, 1000);
 
 // --------------------
-// Start server
+// Start Server
 // --------------------
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+server.listen(PORT, () =>
+  console.log(`🚀 Server running on http://localhost:${PORT}`)
+);

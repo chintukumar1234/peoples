@@ -121,8 +121,85 @@ const slot1Info = document.getElementById("slot1_info");
 const slot2Info = document.getElementById("slot2_info");
 
 /* ================= Map ================= */
-const map = L.map("map").setView([20.5937,78.9629],5);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{ attribution:'© OpenStreetMap contributors' }).addTo(map);
+// Initialize map
+const map = L.map('map').setView([28.6139, 77.2090], 13); // default view (New Delhi)
+
+// 🗺️ Base Layers
+const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap contributors'
+});
+
+const satelliteLayer = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  {
+    maxZoom: 18,
+    attribution: 'Tiles © Esri, Maxar, Earthstar Geographics'
+  }
+);
+
+const labelsLayer = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  {
+    maxZoom: 18,
+    attribution: 'Labels © Esri'
+  }
+);
+
+const hybridLayer = L.layerGroup([satelliteLayer, labelsLayer]);
+
+// Add default layer
+streetLayer.addTo(map);
+
+// Add control to switch layers
+L.control.layers({
+  "Street Map": streetLayer,
+  "Satellite": satelliteLayer,
+  "Hybrid": hybridLayer
+}).addTo(map);
+
+// 📍 Real-time location tracking
+let userMarker = null;
+let accuracyCircle = null;
+
+function onLocationFound(e) {
+  const { latlng, accuracy } = e;
+
+  // Update or create marker
+  if (!userMarker) {
+    userMarker = L.marker(latlng)
+      .addTo(map)
+      .bindPopup("📍 You are here")
+      .openPopup();
+  } else {
+    userMarker.setLatLng(latlng);
+  }
+
+  // Update or create accuracy circle
+  if (!accuracyCircle) {
+    accuracyCircle = L.circle(latlng, { radius: accuracy / 2 }).addTo(map);
+  } else {
+    accuracyCircle.setLatLng(latlng);
+    accuracyCircle.setRadius(accuracy / 2);
+  }
+
+  // Keep map centered on user
+  map.setView(latlng, map.getZoom());
+}
+
+function onLocationError(e) {
+  alert(`⚠️ Location error: ${e.message}`);
+}
+
+// Watch position continuously
+map.locate({
+  watch: true,     // keeps updating
+  setView: false,  // we manually handle centering
+  enableHighAccuracy: true
+});
+
+map.on("locationfound", onLocationFound);
+map.on("locationerror", onLocationError);
 
 /* ================= Socket ================= */
 const socket = io({ reconnection:true, transports:['websocket','polling'] });
