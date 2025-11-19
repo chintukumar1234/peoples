@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Admin Panel — Drivers with Directions</title>
-
   <!-- Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -111,7 +110,7 @@
       });
     };
 
-   // ✅ Real-time driver map with satellite toggle + auto route refresh
+// ✅ Real-time driver map with satellite toggle + auto route refresh
 async function openDriverMap(driverId) {
   const popup = document.getElementById("mapPopup");
   popup.style.display = "flex";
@@ -131,7 +130,7 @@ async function openDriverMap(driverId) {
   const map = new google.maps.Map(mapEl, {
     center: { lat: Number(driver.lat), lng: Number(driver.lng) },
     zoom: 14,
-    mapTypeId: "hybrid", // hybrid = satellite + labels
+    mapTypeId: "hybrid",
     streetViewControl: false,
     fullscreenControl: true,
   });
@@ -170,9 +169,8 @@ async function openDriverMap(driverId) {
   const directionsService = new google.maps.DirectionsService();
   let activePolylines = [];
 
-  // 🔸 Function to draw route with animation
+  // 🔸 Function to draw routes with animation
   async function drawRoutes(fromPos) {
-    // Clear previous lines
     activePolylines.forEach((p) => p.setMap(null));
     activePolylines = [];
 
@@ -210,17 +208,60 @@ async function openDriverMap(driverId) {
     }
   }
 
-  // Draw initial routes
   await drawRoutes({ lat: +driver.lat, lng: +driver.lng });
 
-  // Fit all markers
   const bounds = new google.maps.LatLngBounds();
   bounds.extend(driverMarker.getPosition());
   riderPoints.forEach((rp) => bounds.extend(rp));
   map.fitBounds(bounds);
 
-  // 🔸 Track last driver position to detect large moves
   let lastPos = { lat: +driver.lat, lng: +driver.lng };
+
+  // =====================================================
+  // ⭐⭐ UBER-STYLE BEZIER CURVED SMOOTH MARKER MOVEMENT
+  // =====================================================
+
+  // Generate curved point between start & end
+  function bezierPoint(start, end, t) {
+    const cp = {
+      lat: (start.lat() + end.lat()) / 2 + (Math.random() * 0.001 - 0.0005),
+      lng: (start.lng() + end.lng()) / 2 + (Math.random() * 0.001 - 0.0005),
+    };
+
+    const lat =
+      (1 - t) ** 2 * start.lat() +
+      2 * (1 - t) * t * cp.lat +
+      t ** 2 * end.lat();
+
+    const lng =
+      (1 - t) ** 2 * start.lng() +
+      2 * (1 - t) * t * cp.lng +
+      t ** 2 * end.lng();
+
+    return { lat, lng };
+  }
+
+  // Animate marker nicely
+  function animateMarker(startPos, endPos, duration = 1000) {
+    const startTime = performance.now();
+
+    function frame(now) {
+      const t = Math.min((now - startTime) / duration, 1);
+
+      // Ease-in-out
+      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+      const pos = bezierPoint(startPos, endPos, eased);
+      driverMarker.setPosition(pos);
+
+      if (t < 1) requestAnimationFrame(frame);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  // =====================================================
+
 
   // 🔸 Real-time Firebase listener for live updates
   const driverRef = ref(db, "drivers/" + driverId);
@@ -231,33 +272,21 @@ async function openDriverMap(driverId) {
 
     const newPos = { lat: +updated.lat, lng: +updated.lng };
 
-    // Smooth marker motion
-    const start = driverMarker.getPosition();
-    let progress = 0;
-    const smoothMove = () => {
-      progress += 0.05;
-      if (progress <= 1) {
-        const lat = start.lat() + (newPos.lat - start.lat()) * progress;
-        const lng = start.lng() + (newPos.lng - start.lng()) * progress;
-        driverMarker.setPosition({ lat, lng });
-        requestAnimationFrame(smoothMove);
-      } else {
-        driverMarker.setPosition(newPos);
-      }
-    };
-    smoothMove();
+    // Use Uber-style animation
+    animateMarker(
+      driverMarker.getPosition(),
+      new google.maps.LatLng(newPos.lat, newPos.lng)
+    );
 
-    // Check distance moved; redraw routes if >100 m
     const distance = haversineDistance(lastPos, newPos);
-    if (distance > 0.1) { // km (≈100 m)
+    if (distance > 0.1) {
       lastPos = newPos;
       await drawRoutes(newPos);
     }
   });
 
-  // 🔹 Haversine formula (distance between two coords in km)
   function haversineDistance(p1, p2) {
-    const R = 6371; // km
+    const R = 6371;
     const dLat = ((p2.lat - p1.lat) * Math.PI) / 180;
     const dLng = ((p2.lng - p1.lng) * Math.PI) / 180;
     const a =
@@ -268,6 +297,7 @@ async function openDriverMap(driverId) {
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 }
+
 
     // 🔸 Close map popup
     window.closeMapPopup = function () {
@@ -281,6 +311,48 @@ async function openDriverMap(driverId) {
       }
       popup.style.display = "none";
     };
+  
+  document.getElementById("clickhere").addEventListener("click",function(){
+   const result=document.getElementById("q");
+   document.getElementById("q").innerHTML="";
+   new QRCode(result,{
+   text:"https://peoples-hfmh.onrender.com/",
+   width:300,
+   height:300
+   });
+   window.chintu=function(){
+         const img=document.querySelector("#q img");
+         const link=document.createElement("a");
+         link.href=img.src;
+         link.download="qr_code.png";
+         link.click();
+   }
+  setTimeout(()=>{
+    document.getElementById("hii").style.transform="scale(1)";
+
+   },200);
+  });
+
+  document.getElementById("cliclose").addEventListener("click",function(){
+    document.getElementById("hii").style.transform="scale(0)";
+   });
+
+   document.getElementById("payhere").addEventListener("click",function(){
+    const result=document.getElementById("p");
+   document.getElementById("p").innerHTML="";
+   new QRCode(result,{
+   text:"upi://pay?pa=chintukr32101-1@oksbi&pn=Chintu&cu=INR",
+   width:300,
+   height:300
+   });
+   setTimeout(()=>{
+    document.getElementById("hiip").style.transform="scale(1)";
+
+   },200);
+   });
+   document.getElementById("payclose").addEventListener("click",function(){
+    document.getElementById("hiip").style.transform="scale(0)";
+   });
   </script>
 
   <!-- Google Maps -->
@@ -468,11 +540,95 @@ async function openDriverMap(driverId) {
       from { opacity: 0; transform: scale(0.95); }
       to { opacity: 1; transform: scale(1); }
     }
+
+.qrcode {
+  position: fixed;
+  padding: 15px;
+  width: 20%;
+  background: rgb(255, 255, 255);
+  border-radius: 15px;
+  box-shadow: 0 4px 15px rgb(0 0 0 / 20%);
+  transform: scale(0);        /* Hidden initially */
+  transform-origin: center;   /* Scale from center */
+  transition: transform 0.5s ease;
+  left: 40%;
+  right: 40%;
+}
+/* Button styling */
+.qrcodebutton {
+  width: 100%;
+  height: 35px;
+  background-color: rgb(102, 117, 253);
+  border-radius: 16px;
+  cursor: pointer;
+  margin: 10px 0 0 0 ;
+}
+
+.qrcodebutton:hover {
+  background-color: rgb(36, 50, 245);
+}
+.qrcodeclose {
+  width: 100%;
+  height: 35px;
+  background-color: rgb(241, 130, 56);
+  border-radius: 16px;
+  cursor: pointer;
+  margin: 10px 0 0 0 ;
+}
+
+.qrcodeclose:hover {
+  background-color: rgb(230, 46, 21);
+}
+@media (max-width: 600px) {
+  .qrcode {
+    padding: 12px;
+    width: 90%;
+    left: 5%;
+  }
+
+  .qrcodebutton {
+    height: 38px;
+    font-size: 15px;
+  }
+}
+
+.logo {
+      position: absolute;
+      width: 90px;
+      height: 90px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .logo img {
+      width: 70px;
+    }
   </style>
 </head>
 
 <body>
   <h1>Admin — Drivers (with Directions)</h1>
+
+  <div class="qrcode" id="hiip">
+    <div id="p"></div>
+     <div class="logo">
+        <img src="https://tse1.mm.bing.net/th/id/OIP.r5wSc0-B3GQMSzAjIByfgQHaHZ?rs=1&pid=ImgDetMain&o=7&rm=3">
+      </div>
+    <button class="qrcodeclose" id="payclose">Close QR Code</button>
+  </div>
+    <div class="qrcode" id="hii">
+<div id="q"></div>
+<button class="qrcodebutton" onclick="chintu()">Download QR Code</button>
+<button class="qrcodeclose" id="cliclose">Close QR Code</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<button id="clickhere">open QR code</button>
 
   <div class="toolbar">
     <div class="meta">
@@ -481,6 +637,7 @@ async function openDriverMap(driverId) {
     </div>
     <div>
       <button onclick="renderTable()">Refresh</button>
+      <button id="payhere" > payment</button>
     </div>
   </div>
 
