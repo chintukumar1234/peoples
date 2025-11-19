@@ -222,27 +222,29 @@ async function openDriverMap(driverId) {
   // =====================================================
 
   // Generate curved point between start & end
-  function bezierPoint(start, end, t) {
-    const cp = {
-      lat: (start.lat() + end.lat()) / 2 + (Math.random() * 0.001 - 0.0005),
-      lng: (start.lng() + end.lng()) / 2 + (Math.random() * 0.001 - 0.0005),
-    };
+  // Generate a smooth bezier point between start & end
+function bezierPoint(start, end, t) {
+  // ensure start/end are LatLng objects
+  const sLat = start.lat instanceof Function ? start.lat() : start.lat;
+  const sLng = start.lng instanceof Function ? start.lng() : start.lng;
+  const eLat = end.lat instanceof Function ? end.lat() : end.lat;
+  const eLng = end.lng instanceof Function ? end.lng() : end.lng;
 
-    const lat =
-      (1 - t) ** 2 * start.lat() +
-      2 * (1 - t) * t * cp.lat +
-      t ** 2 * end.lat();
+  // single control point in the middle, slightly offset for curve
+  const cp = {
+    lat: (sLat + eLat) / 2 + 0.0002, // small fixed offset
+    lng: (sLng + eLng) / 2 + 0.0002,
+  };
 
-    const lng =
-      (1 - t) ** 2 * start.lng() +
-      2 * (1 - t) * t * cp.lng +
-      t ** 2 * end.lng();
+  const lat = (1 - t) ** 2 * sLat + 2 * (1 - t) * t * cp.lat + t ** 2 * eLat;
+  const lng = (1 - t) ** 2 * sLng + 2 * (1 - t) * t * cp.lng + t ** 2 * eLng;
 
-    return { lat, lng };
-  }
+  return { lat, lng };
+}
+
 
   // Animate marker nicely
-  function animateMarker(startPos, endPos, duration = 1000) {
+  function animateMarker(startPos, endPos, duration = 3000) {
     const startTime = performance.now();
 
     function frame(now) {
