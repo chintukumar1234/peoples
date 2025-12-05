@@ -270,32 +270,55 @@
     drawPolylinesFromRoutes(routes);
   }
 
-  async function openDriverMap(driverId) {
-    const popup = document.getElementById('mapPopup'); popup.style.display = 'flex';
-    const mapEl = document.getElementById('mapCanvas'); mapEl.innerHTML = '';
+async function openDriverMap(driverId) {
+    const popup = document.getElementById('mapPopup'); 
+    popup.style.display = 'flex';
 
-    // fetch initial driver snapshot
+    const mapEl = document.getElementById('mapCanvas'); 
+    mapEl.innerHTML = '';
+
+    // fetch driver snapshot
     const snap = await get(ref(db, 'drivers/' + driverId));
-    if (!snap.exists()) { alert('Driver not found'); return; }
+    if (!snap.exists()) { 
+        alert('Driver not found'); 
+        return; 
+    }
 
     let driver = snap.val();
-    if (!driver.Driver_lat || !driver.Driver_lng) { alert('Driver has no location'); return; }
-    if(!driver.Rider1_lat|| !driver.Rider1_lng){
-      alert('Rider has no location'); return; 
-    }else{
-      navigator.geolocation.watchPosition((pos)=>{
-          const lat=pos.coords.latitude;
-          const lng=pos.coords.longitude;
-          socket.emit("riderPositionUpdate",{driverId,lat,lng});
-      }, (err) => {
-     console.error("Geolocation error:", err);
-      }, {
-          enableHighAccuracy: true,
-          maximumAge: 1000,
-          timeout: 10000
-      });
+    if (!driver.Driver_lat || !driver.Driver_lng) { 
+        alert('Driver has no location'); 
+        return; 
     }
-    
+
+    // 🟢 FIXED — check if rider exists
+    if (!driver.Rider1_id && !driver.Rider2_id) {
+        alert("No rider assigned to this driver");
+        return;
+    }
+
+    // 🟢 FIXED — Start sending LIVE rider location to backend
+    navigator.geolocation.watchPosition((pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        let riderId = null;
+
+        // choose correct riderId
+        if (driver.Rider1_id) riderId = driver.Rider1_id;
+        if (driver.Rider2_id) riderId = driver.Rider2_id; // last rider replaces first
+
+        if (!riderId) return;
+
+        socket.emit("riderLiveLocation", { riderId, lat, lng });
+
+    }, (err) => {
+        console.error("Geolocation error:", err);
+    }, {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 10000
+    });
+
     // create map
     currentMap = L.map(mapEl);
     currentMap.setView([driver.Driver_lat, driver.Driver_lng], 15);
@@ -313,72 +336,76 @@
     driverMarker = L.marker([driver.Driver_lat, driver.Driver_lng], { icon: driverIcon }).addTo(currentMap);
 
     const riderPoints = [];
-    if (driver.Rider1_lat && driver.Rider1_lng) riderPoints.push({ lat: Number(driver.Rider1_lat), lng: Number(driver.Rider1_lng), label: 'Rider 1', id: driver.Rider1_id });
-    if (driver.Rider2_lat && driver.Rider2_lng) riderPoints.push({ lat: Number(driver.Rider2_lat), lng: Number(driver.Rider2_lng), label: 'Rider 2', id: driver.Rider2_id });
+    if (driver.Rider1_lat && driver.Rider1_lng)
+        riderPoints.push({ lat: Number(driver.Rider1_lat), lng: Number(driver.Rider1_lng), label: 'Rider 1', id: driver.Rider1_id });
+    if (driver.Rider2_lat && driver.Rider2_lng)
+        riderPoints.push({ lat: Number(driver.Rider2_lat), lng: Number(driver.Rider2_lng), label: 'Rider 2', id: driver.Rider2_id });
 
-    riderMarkers = riderPoints.map(r => L.marker([r.lat, r.lng], { icon: riderIcon }).addTo(currentMap).bindTooltip(r.label));
+    riderMarkers = riderPoints.map(r =>
+        L.marker([r.lat, r.lng], { icon: riderIcon }).addTo(currentMap).bindTooltip(r.label)
+    );
 
     await maybeRecalcRoutes({ lat: driver.Driver_lat, lng: driver.Driver_lng }, riderPoints);
 
-    // Attach a live Firebase listener to this driver's node
+    // Firebase live listener
     const driverRef = ref(db, 'drivers/' + driverId);
 
-    if (currentDriverListener) { // detach previous
-      try { currentDriverListener(); } catch {} currentDriverListener = null;
+    if (currentDriverListener) {
+        try { currentDriverListener(); } catch {}
+        currentDriverListener = null;
     }
 
     const listener = onValue(driverRef, async (s) => {
-      if (!s.exists()) return;
-      const d = s.val();
+        if (!s.exists()) return;
+        const d = s.val();
 
-      // update driver marker
-      if (d.Driver_lat && d.Driver_lng) {
-        if (!driverMarker) driverMarker = L.marker([d.Driver_lat, d.Driver_lng], { icon: driverIcon }).addTo(currentMap);
-        else driverMarker.setLatLng([d.Driver_lat, d.Driver_lng]);
-      }
-
-      // update static rider markers (non-live riders)
-      const newRiderPoints = [];
-      if (d.Rider1_lat && d.Rider1_lng) newRiderPoints.push({ lat: Number(d.Rider1_lat), lng: Number(d.Rider1_lng), label: 'Rider 1', id: d.Rider1_id });
-      if (d.Rider2_lat && d.Rider2_lng) newRiderPoints.push({ lat: Number(d.Rider2_lat), lng: Number(d.Rider2_lng), label: 'Rider 2', id: d.Rider2_id });
-
-      // refresh riderMarkers: remove old then add new
-      riderMarkers.forEach(m => m.remove()); riderMarkers = [];
-      newRiderPoints.forEach(r => { riderMarkers.push(L.marker([r.lat, r.lng], { icon: riderIcon }).addTo(currentMap).bindTooltip(r.label)); });
-
-      // update/update live markers (these may represent riders whose sockets would send updates in original flow)
-      // We use Rider1_id / Rider2_id as keys and Rider*_lat/lng as live positions
-      [ ['Rider1_id','Rider1_lat','Rider1_lng'], ['Rider2_id','Rider2_lat','Rider2_lng'] ].forEach(([idKey, latKey, lngKey]) => {
-        const rid = d[idKey];
-        const rlat = d[latKey];
-        const rlng = d[lngKey];
-        if (!rid) return;
-        if (typeof rlat === 'number' && typeof rlng === 'number') {
-          if (!liveRiderMarkers[rid]) {
-            liveRiderMarkers[rid] = L.marker([rlat, rlng], { icon: riderLiveIcon }).addTo(currentMap);
-          } else {
-            liveRiderMarkers[rid].setLatLng([rlat, rlng]);
-          }
+        // update driver marker
+        if (d.Driver_lat && d.Driver_lng) {
+            if (!driverMarker) driverMarker = L.marker([d.Driver_lat, d.Driver_lng], { icon: driverIcon }).addTo(currentMap);
+            else driverMarker.setLatLng([d.Driver_lat, d.Driver_lng]);
         }
-      });
 
-      // recalc routes when driver location changes
-      if (d.Driver_lat && d.Driver_lng) {
-        await maybeRecalcRoutes({ lat: d.Driver_lat, lng: d.Driver_lng }, newRiderPoints);
-      }
+        // refresh static markers
+        const newRiderPoints = [];
+        if (d.Rider1_lat && d.Rider1_lng) newRiderPoints.push({ lat: Number(d.Rider1_lat), lng: Number(d.Rider1_lng), label: 'Rider 1', id: d.Rider1_id });
+        if (d.Rider2_lat && d.Rider2_lng) newRiderPoints.push({ lat: Number(d.Rider2_lat), lng: Number(d.Rider2_lng), label: 'Rider 2', id: d.Rider2_id });
+
+        riderMarkers.forEach(m => m.remove());
+        riderMarkers = [];
+        newRiderPoints.forEach(r => {
+            riderMarkers.push(L.marker([r.lat, r.lng], { icon: riderIcon }).addTo(currentMap).bindTooltip(r.label));
+        });
+
+        // live rider markers
+        [['Rider1_id','Rider1_lat','Rider1_lng'], ['Rider2_id','Rider2_lat','Rider2_lng']].forEach(([idKey, latKey, lngKey]) => {
+            const rid = d[idKey];
+            const rlat = d[latKey];
+            const rlng = d[lngKey];
+            if (!rid) return;
+
+            if (!liveRiderMarkers[rid]) {
+                liveRiderMarkers[rid] = L.marker([rlat, rlng], { icon: riderLiveIcon }).addTo(currentMap);
+            } else {
+                liveRiderMarkers[rid].setLatLng([rlat, rlng]);
+            }
+        });
+
+        // update routes
+        if (d.Driver_lat && d.Driver_lng) {
+            await maybeRecalcRoutes({ lat: d.Driver_lat, lng: d.Driver_lng }, newRiderPoints);
+        }
     });
 
-    // store detach function
     currentDriverListener = () => off(driverRef, 'value', listener);
 
-    // cleanup when popup closed
     popup._leafletCleanup = () => {
-      try { if (currentDriverListener) { currentDriverListener(); currentDriverListener = null; } } catch {}
-      clearMapState();
-      if (currentMap) { try { currentMap.remove(); } catch {} currentMap = null; }
-      lastRouteFrom = null;
+        try { if (currentDriverListener) { currentDriverListener(); currentDriverListener = null; } } catch {}
+        clearMapState();
+        if (currentMap) { try { currentMap.remove(); } catch {} currentMap = null; }
+        lastRouteFrom = null;
     };
-  }
+}
+
    
   // Assume you want Rider1 for a specific driver
 onValue(ref(db, 'drivers'), snapshot => {
