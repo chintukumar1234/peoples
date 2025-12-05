@@ -1,441 +1,325 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Admin Panel — Drivers with Directions</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transportation Helper - Information Page</title>
 
-  <!-- Firebase -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-    import { getDatabase, ref, get, onValue, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-
-    // 🔹 Firebase configuration
-    const firebaseConfig = {
-      apiKey: "AIzaSyARe_cDs_WHl7CkCJTjCEaTMFAksmi1SXg",
-      authDomain: "maps-41eca.firebaseapp.com",
-      databaseURL: "https://maps-41eca-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "maps-41eca",
-      storageBucket: "maps-41eca.firebasestorage.app",
-      messagingSenderId: "850870521671",
-      appId: "1:850870521671:web:6a986f4f81a6cb976b8662",
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    // Global variable for all drivers
-    let allDrivers = {};
-
-    // 🔸 Listen for driver data
-    onValue(ref(db, "drivers"), snapshot => {
-      allDrivers = snapshot.exists() ? snapshot.val() : {};
-      renderTable();
-    });
-
-    // 🔸 Render driver table
-    window.renderTable = function () {
-      const tbody = document.getElementById("driverTableBody");
-      tbody.innerHTML = "";
-      let count = 0;
-      const q = document.getElementById("searchInput").value.trim().toLowerCase();
-
-      for (const id in allDrivers) {
-        const d = allDrivers[id];
-        if (!d) continue;
-
-        // search filter
-        if (q && !((d.name||"").toLowerCase().includes(q) || (d.gmail||"").toLowerCase().includes(q) || (d.mobile||"").includes(q)))
-          continue;
-
-        count++;
-        const tr = document.createElement("tr");
-        tr.className = d.online ? "onlineRow" : "offlineRow";
-
-        const rider1 = d.rider1_id || "-";
-        const rider2 = d.rider2_id || "-";
-        const code1 = d.booking1_code || "-";
-        const code2 = d.booking2_code || "-";
-
-        tr.innerHTML = `
-          <td>${d.name || "-"}</td>
-          <td>${d.gmail || "-"}</td>
-          <td>${d.mobile || "-"}</td>
-          <td>${d.online ? "🟢 Online" : "🔴 Offline"}</td>
-          <td>
-            <div>👤 Rider1: ${rider1}</div>
-            <div>Code: ${code1}</div>
-            <hr>
-            <div>👤 Rider2: ${rider2}</div>
-            <div>Code: ${code2}</div>
-          </td>
-          <td>
-            <button class="viewMapBtn" data-id="${id}">🗺️ View Map</button>
-            <button class="deleteBtn" data-id="${id}">🗑️ Delete</button>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      }
-
-      document.getElementById("driverCount").innerText = count;
-
-      // 🔸 Attach Delete Button Functionality
-      document.querySelectorAll(".deleteBtn").forEach(btn => {
-        btn.onclick = async (e) => {
-          const id = e.target.dataset.id;
-
-          const code = prompt("🔐 Enter admin code to delete this driver:");
-          if (code !== "Chintu@Admin2025") {
-            alert("❌ Invalid code. You are not authorized to delete this driver.");
-            return;
-          }
-
-          if (!confirm("⚠️ Are you sure you want to delete this driver?")) return;
-
-          try {
-            await remove(ref(db, "drivers/" + id));
-            alert("✅ Driver deleted successfully!");
-          } catch (error) {
-            console.error(error);
-            alert("⚠️ Failed to delete driver. Check console for details.");
-          }
-        };
-      });
-
-      // 🔸 Attach View Map Button Functionality
-      document.querySelectorAll(".viewMapBtn").forEach(btn => {
-        btn.onclick = async (e) => {
-          const id = btn.dataset.id;
-          await openDriverMap(id);
-        };
-      });
-    };
-
-    // 🔸 Open map popup for selected driver
-    async function openDriverMap(driverId) {
-      const snap = await get(ref(db, "drivers/" + driverId));
-      if (!snap.exists()) { alert("Driver not found"); return; }
-      const driver = snap.val();
-
-      if (!driver.lat || !driver.lng) {
-        alert("Driver has no location (lat/lng) data.");
-        return;
-      }
-
-      const popup = document.getElementById("mapPopup");
-      popup.style.display = "flex";
-      const mapEl = document.getElementById("mapCanvas");
-      mapEl.innerHTML = "";
-
-      const map = new google.maps.Map(mapEl, {
-        center: { lat: Number(driver.lat), lng: Number(driver.lng) },
-        zoom: 13,
-      });
-
-      const markers = [];
-      const renderers = [];
-
-      // Driver marker
-      const driverMarker = new google.maps.Marker({
-        position: { lat: Number(driver.lat), lng: Number(driver.lng) },
-        map,
-        title: driver.name || "Driver",
-        icon: "http://maps.google.com/mapfiles/ms/icons/green-dot.png"
-      });
-      markers.push(driverMarker);
-
-      const riderPoints = [];
-      if (driver.rider1_lat && driver.rider1_lng) {
-        riderPoints.push({ lat: Number(driver.rider1_lat), lng: Number(driver.rider1_lng), label: "Rider 1" });
-      }
-      if (driver.rider2_lat && driver.rider2_lng) {
-        riderPoints.push({ lat: Number(driver.rider2_lat), lng: Number(driver.rider2_lng), label: "Rider 2" });
-      }
-
-      riderPoints.forEach((rp) => {
-        const m = new google.maps.Marker({
-          position: { lat: rp.lat, lng: rp.lng },
-          map,
-          title: rp.label,
-          icon: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
-        });
-        markers.push(m);
-      });
-
-      const directionsService = new google.maps.DirectionsService();
-      for (let i = 0; i < riderPoints.length; ++i) {
-        const rp = riderPoints[i];
-        try {
-          const result = await directionsService.route({
-            origin: { lat: Number(driver.lat), lng: Number(driver.lng) },
-            destination: { lat: rp.lat, lng: rp.lng },
-            travelMode: google.maps.TravelMode.DRIVING,
-            unitSystem: google.maps.UnitSystem.METRIC
-          });
-          const renderer = new google.maps.DirectionsRenderer({
-            map,
-            directions: result,
-            suppressMarkers: true,
-            preserveViewport: true,
-            polylineOptions: {
-              strokeColor: i === 0 ? "#0078ff" : "#ff4081",
-              strokeOpacity: 0.95,
-              strokeWeight: 6,
-              icons: [{
-                icon: { path: google.maps.SymbolPath.FORWARD_OPEN_ARROW },
-                offset: '25px',
-                repeat: '50px'
-              }]
-            }
-          });
-          renderers.push(renderer);
-        } catch (err) {
-          console.error("Directions error:", err);
-        }
-      }
-
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend({ lat: Number(driver.lat), lng: Number(driver.lng) });
-      riderPoints.forEach(rp => bounds.extend({ lat: rp.lat, lng: rp.lng }));
-      if (riderPoints.length === 0) map.setZoom(15); else map.fitBounds(bounds);
-
-      popup._mapObjects = { markers, renderers, map };
-    }
-
-    // 🔸 Close map popup
-    window.closeMapPopup = function () {
-      const popup = document.getElementById("mapPopup");
-      if (!popup) return;
-      const data = popup._mapObjects;
-      if (data) {
-        if (data.markers) data.markers.forEach(m => m.setMap(null));
-        if (data.renderers) data.renderers.forEach(r => r.setMap && r.setMap(null));
-        popup._mapObjects = null;
-      }
-      popup.style.display = "none";
-    };
-  </script>
-
-  <!-- Google Maps -->
-  <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBb3cYzaeiSbLn2wO7vwvLBHLaErz6pBeo&callback=initMap"></script>
-  <script>function initMap() {}</script>
-
-  <!-- 💅 Modern Mobile-Friendly Styles -->
   <style>
-    :root {
-      --accent: #0078ff;
-      --muted: #7b8aa3;
-      --bg: #f4f7fb;
-      --card-bg: #fff;
-      --success: #2ea44f;
-      --danger: #d73a49;
-    }
-
-    * { box-sizing: border-box; }
-
     body {
-      font-family: "Inter", system-ui, Arial, sans-serif;
-      background: var(--bg);
+      font-family: Arial, sans-serif;
       margin: 0;
-      padding: 15px;
-      color: #1e293b;
+      padding: 0;
+      background: #e8eaee;
+      color: #333;
+      line-height: 1.6;
     }
 
-    h1 {
-      color: #173a6c;
-      font-size: 1.5rem;
-      margin-bottom: 1rem;
-      text-align: center;
-    }
-
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: center;
-      margin-bottom: 15px;
-    }
-
-    #searchInput {
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid #d0d6df;
-      width: 100%;
-      max-width: 320px;
-      font-size: 15px;
-      outline: none;
-      transition: 0.2s;
-    }
-
-    #searchInput:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 4px var(--accent);
-    }
-
-    .tableWrap {
-      background: var(--card-bg);
-      border-radius: 10px;
-      padding: 10px;
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
-      overflow-x: auto;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 14px;
-      min-width: 650px;
-    }
-
-    th, td {
-      padding: 10px;
-      border-bottom: 1px solid #eef2f7;
-      text-align: left;
-      vertical-align: top;
-    }
-
-    th {
-      background: var(--accent);
+    header {
+      background: linear-gradient(90deg,#f7f9fc,rgb(50, 194, 230),#f7f9fc);
       color: white;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    tr.onlineRow:hover { background: #ecfdf5; }
-    tr.offlineRow:hover { background: #fef2f2; }
-
-    .viewMapBtn, .deleteBtn {
-      border: none;
-      padding: 8px 12px;
-      border-radius: 8px;
-      cursor: pointer;
-      color: #fff;
-      font-size: 14px;
-      transition: 0.2s;
-      margin: 3px 0;
-    }
-
-    .viewMapBtn { background: var(--success); }
-    .deleteBtn { background: var(--danger); }
-
-    .viewMapBtn:hover { background: #22b55b; }
-    .deleteBtn:hover { background: #f05252; }
-
-    #mapPopup {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.6);
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
-      backdrop-filter: blur(4px);
-    }
-
-    #mapBox {
-      width: 90%;
-      height: 80%;
-      background: var(--card-bg);
-      border-radius: 14px;
-      overflow: hidden;
-      position: relative;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
-      animation: fadeIn 0.3s ease;
-    }
-
-    #mapCanvas {
-      width: 100%;
-      height: 100%;
-    }
-
-    #closeMap {
-      position: absolute;
-      right: 14px;
-      top: 14px;
-      background: #ff5252;
-      border-radius: 50%;
-      width: 36px;
-      height: 36px;
-      color: #fff;
+      padding: 20px;
+      text-align: center;
       font-weight: bold;
-      border: none;
-      cursor: pointer;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
     }
 
-    .meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      color: var(--muted);
-    }
-
-    #driverCount {
-      font-weight: 600;
-      color: var(--accent);
-    }
-
-    button {
-      border: none;
-      padding: 8px 12px;
+    .container {
+      width: 90%;
+      max-width: 90%;
+      margin: -30px auto;
+      background: white;
+      padding: 30px;
       border-radius: 8px;
-      background: var(--accent);
-      color: #fff;
+      box-shadow: 0px 4px 12px rgba(0,0,0,0.1);
+    }
+
+    h2 {
+      color: #003e9f;
+      border-left: 4px solid #003e9f;
+      padding-left: 10px;
+    }
+
+    ul {
+      margin: 10px 0 20px 20px;
+    }
+
+    footer {
+      text-align: center;
+      background: #111;
+      color: white;
+      padding: 15px;
+      margin-top: 40px;
+    }
+
+    /* ------- Feedback Design ------- */
+
+    .feedback-box {
+      background: #f2f6ff;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 25px;
+      box-shadow: 0px 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .feedback-box h3 {
+      margin-bottom: 10px;
+    }
+
+    .stars span {
+      font-size: 32px;
       cursor: pointer;
-      transition: 0.2s;
+      color: #ccc;
+      padding: 5px;
     }
 
-    button:hover { background: #005ed1; }
-
-    /* 🌍 Responsive */
-    @media (max-width: 768px) {
-      h1 { font-size: 1.25rem; }
-      .tableWrap { padding: 6px; }
-      th, td { padding: 8px; font-size: 13px; }
-      #mapBox { width: 95%; height: 70%; }
+    .stars span.selected {
+      color: gold;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: scale(0.95); }
-      to { opacity: 1; transform: scale(1); }
+    textarea {
+      width: 100%;
+      height: 80px;
+      margin-top: 10px;
+      border-radius: 6px;
+      border: 1px solid #aaa;
+      padding: 10px;
+      resize: none;
+    }
+
+    .submit-btn {
+      margin-top: 15px;
+      background: #003e9f;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .submit-btn:hover {
+      background: #0053d8;
+    }
+
+    .feedback-card {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 5px solid #003e9f;
+      margin-bottom: 15px;
+      box-shadow: 0px 2px 6px rgba(0,0,0,0.1);
+    }
+
+    .feedback-rating {
+      color: gold;
+      font-size: 20px;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        width: 90%;
+        padding: 15px;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      p {
+        font-size: 14px;
+      }
+      h2 {
+        font-size: 18px;
+      }
+      .submit-btn {
+        width:100%;
+      }
     }
   </style>
+
 </head>
-
 <body>
-  <h1>Admin — Drivers (with Directions)</h1>
 
-  <div class="toolbar">
-    <div class="meta">
-      <input id="searchInput" placeholder="Search name, gmail or mobile" oninput="renderTable()" />
-      <div>Total: <span id="driverCount">0</span></div>
+<header>
+  <h1>Transportation Helper</h1>
+</header>
+
+<div class="container">
+
+  <h2>1. Transportation Helper — परिचय</h2>
+  <p>
+    “ट्रांसपोर्टेशन हेल्पर” एक वेब आधारित प्लेटफॉर्म है जो ड्राइवर और राइडर के बीच बुकिंग 
+    को आसान और सुरक्षित बनाता है। यह रियल-टाइम ट्रैकिंग, बुकिंग, पेमेंट और 
+    फीडबैक जैसी सुविधाएँ प्रदान करता है।
+  </p>
+
+  <h2>2. Objectives</h2>
+  <ul>
+    <li>To provide a reliable ride booking experience.</li>
+    <li>To help drivers with navigation and earnings.</li>
+    <li>To track rides live in real-time.</li>
+  </ul>
+
+  <h2>3. Rider Features</h2>
+  <ul>
+    <li>Ride booking</li>
+    <li>Live tracking</li>
+    <li>Fare estimation</li>
+    <li>Emergency SOS</li>
+  </ul>
+
+  <h2>4. Driver Features</h2>
+  <ul>
+    <li>Online/Offline ride control</li>
+    <li>Ride request alerts</li>
+    <li>Earnings overview</li>
+  </ul>
+
+  <h2>5. Administrator Features</h2>
+  <ul>
+    <li>Driver management</li>
+    <li>User management</li>
+    <li>Live map monitoring</li>
+  </ul>
+
+  <h2>6. System Workflow</h2>
+  <ul>
+    <li>Rider books a ride</li>
+    <li>Driver accepts</li>
+    <li>Ride starts → arrival</li>
+    <li>Payment & feedback</li>
+  </ul>
+
+  <h2>7. Conclusion</h2>
+  <p>Transportation Helper ensures safe, transparent, and easy travel for everyone.</p>
+
+  <!-- ---------------------------------------------
+       8. FEEDBACK SECTION STARTS HERE
+  ------------------------------------------------- -->
+
+  <h2>8. Rider Feedback</h2>
+
+  <div class="feedback-box">
+    <h3>अपनी यात्रा का अनुभव शेयर करें</h3>
+
+    <!-- Rating Stars -->
+    <div class="stars" id="starContainer">
+      <span data-value="1">★</span>
+      <span data-value="2">★</span>
+      <span data-value="3">★</span>
+      <span data-value="4">★</span>
+      <span data-value="5">★</span>
     </div>
-    <div>
-      <button onclick="renderTable()">Refresh</button>
-    </div>
+
+    <!-- Feedback Message -->
+    <textarea id="feedbackMessage" placeholder="अपनी राय लिखें..."></textarea>
+
+    <button class="submit-btn" onclick="submitFeedback()">Submit Feedback</button>
   </div>
 
-  <div class="tableWrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th><th>Gmail</th><th>Mobile</th><th>Status</th><th>Bookings</th><th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="driverTableBody">
-        <tr><td colspan="6">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <h3>🔽 Recent Feedback</h3>
+  <div id="feedbackList"></div>
 
-  <!-- Map popup -->
-  <div id="mapPopup" onclick="if(event.target===this) closeMapPopup()">
-    <div id="mapBox">
-      <button id="closeMap" onclick="closeMapPopup()">✖</button>
-      <div id="mapCanvas"></div>
-    </div>
-  </div>
+</div>
+
+<footer>
+  © 2025 Transportation Helper | Information Page
+</footer>
+
+
+
+<!-- ------------------------------------------------------
+     FIREBASE + FEEDBACK SCRIPT
+------------------------------------------------------- -->
+
+<script type="module">
+
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getDatabase, ref, set, push, onValue }
+    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+  // ---------------- YOUR FIREBASE CONFIG ----------------
+  const firebaseConfig = {
+  apiKey: "AIzaSyARe_cDs_WHl7CkCJTjCEaTMFAksmi1SXg",
+  authDomain: "maps-41eca.firebaseapp.com",
+  databaseURL: "https://maps-41eca-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "maps-41eca",
+  storageBucket: "maps-41eca.firebasestorage.app",
+  messagingSenderId: "850870521671",
+  appId: "1:850870521671:web:6a986f4f81a6cb976b8662",
+  measurementId: "G-VDW9C5BWL3"
+};
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+
+  // -------------- STAR SELECTION ----------------
+  let selectedRating = 0;
+  const stars = document.querySelectorAll("#starContainer span");
+
+  stars.forEach(star => {
+    star.addEventListener("click", () => {
+      selectedRating = star.dataset.value;
+
+      // Reset
+      stars.forEach(s => s.classList.remove("selected"));
+
+      // Highlight stars
+      for (let i = 0; i < selectedRating; i++) {
+        stars[i].classList.add("selected");
+      }
+    });
+  });
+
+
+  // -------------- SUBMIT FEEDBACK ----------------
+  window.submitFeedback = function () {
+    const msg = document.getElementById("feedbackMessage").value;
+
+    if (selectedRating == 0) {
+      alert("Please select a rating!");
+      return;
+    }
+    if (msg.trim() === "") {
+      alert("Please enter feedback message!");
+      return;
+    }
+
+    const feedbackRef = push(ref(db, "feedback"));
+
+    set(feedbackRef, {
+      rating: selectedRating,
+      message: msg,
+    });
+
+    alert("Thank you for your feedback!");
+
+    // Reset inputs
+    document.getElementById("feedbackMessage").value = "";
+    selectedRating = 0;
+    stars.forEach(s => s.classList.remove("selected"));
+  };
+
+
+  // -------------- DISPLAY FEEDBACK ----------------
+  const feedbackList = document.getElementById("feedbackList");
+
+  onValue(ref(db, "feedback"), snapshot => {
+    feedbackList.innerHTML = "";
+
+    snapshot.forEach(item => {
+      const data = item.val();
+
+      feedbackList.innerHTML += `
+        <div class="feedback-card">
+          <div class="feedback-rating">${"★".repeat(data.rating)}</div>
+          <p>${data.message}</p>
+        </div>
+      `;
+    });
+  });
+
+</script>
+
 </body>
 </html>
