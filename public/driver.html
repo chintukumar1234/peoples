@@ -370,7 +370,7 @@ function createRoute(slotKey) {
   slots[slotKey].route = L.Routing.control({
     waypoints: [driverPos, riderPos],
     router: L.Routing.osrmv1({
-      serviceUrl: 'https://router.project-osrm.org/route/v1',
+      serviceUrl: 'http://127.0.0.1:5000/route/v1',
       profile: profile
     }),
     routeWhileDragging: false,

@@ -392,6 +392,62 @@
       font-size: 40px;
     }
     }
+
+  #m { display: none; }
+
+  #popup-bg {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    backdrop-filter: blur(4px);
+    background: rgba(0,0,0,0.35);
+    justify-content: center;
+    align-items: center;
+  }
+
+  .fade-in { animation: fadeIn 0.4s forwards; }
+  .fade-out { animation: fadeOut 0.3s forwards; }
+
+  #popup-box {
+    background: white;
+    padding: 20px;
+    width: 320px;
+    border-radius: 15px;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(0,0,0,0.3);
+    animation: popUp 0.45s ease-out;
+  }
+
+  #popup-message {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 15px;
+  }
+
+  #close-btn {
+    padding: 8px 15px;
+    background: green;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  #close-btn:hover {
+    background: darkgreen;
+  }
+
+  @keyframes popUp {
+    0% { transform: translateY(50px) scale(0.5); opacity: 0; }
+    60% { transform: translateY(-10px) scale(1.05); opacity: 1; }
+    100% { transform: translateY(0px) scale(1); opacity: 1; }
+  }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
   </style>
 </head>
 <body>
@@ -399,6 +455,7 @@
     <img src="https://images.unsplash.com/photo-1600320254374-ce2d293c324e?auto=format&fit=crop&w=1200&q=80" alt="AI Cab Project Header">
     <div class="overlay"></div>
     <h1 class="h">Transportation Helper</h1>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   </header>
 
   <div class="main">
@@ -424,6 +481,14 @@
       <button class="book-btn" id="showDriversBtn">Show Available Drivers</button>
       <div id="driversList">
         <p style="color:#888;">Driver list will appear here after entering pickup & destination.</p>
+      </div>
+    </div>
+    
+    <p id="m"></p>
+    <div id="popup-bg">
+      <div id="popup-box">
+        <div id="popup-message"></div>
+        <button id="close-btn" onclick="closePopup()">OK</button>
       </div>
     </div>
 
@@ -482,19 +547,18 @@
   }
 
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-  import { getDatabase, ref, set, get, child, push, query, orderByChild, equalTo } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+  import { getDatabase, ref, set, get, child, push, query, orderByChild, equalTo ,onValue} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
   const firebaseConfig = {
-    apiKey: "AIzaSyARe_cDs_WHl7CkCJTjCEaTMFAksmi1SXg",
-    authDomain: "maps-41eca.firebaseapp.com",
-    databaseURL: "https://maps-41eca-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "maps-41eca",
-    storageBucket: "maps-41eca.firebasestorage.app",
-    messagingSenderId: "850870521671",
-    appId: "1:850870521671:web:6a986f4f81a6cb976b8662",
-    measurementId: "G-VDW9C5BWL3"
-  };
-
+  apiKey: "AIzaSyCsZcn4VPhpnlgU0K_NPHPINjq9Qi5iVT8",
+  authDomain: "mydatabase-e7c01.firebaseapp.com",
+  databaseURL: "https://mydatabase-e7c01-default-rtdb.firebaseio.com",
+  projectId: "mydatabase-e7c01",
+  storageBucket: "mydatabase-e7c01.firebasestorage.app",
+  messagingSenderId: "447471871540",
+  appId: "1:447471871540:web:d48721caa65174b1598c61",
+  measurementId: "G-80M4PND75H"
+};
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
   /*Driver information in the databases*/
@@ -694,7 +758,48 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
 
     // ✅ Booking Success
     socket.on("bookingSuccess", ({ driverId, bookingCode }) => {
-      alert(`✅ Driver booked successfully!\nBooking Code: ${bookingCode}`);
+  const popupBg    = document.getElementById("popup-bg");
+  const popupText  = document.getElementById("popup-message");
+    const typedMessage = bookingCode;
+
+    if (!typedMessage) {
+      showPopup("Please enter a message!");
+      return;
+    }
+
+    celebrate();
+    showPopup(
+  `✨ Driver Booked! ✨\n🚖 Booking Code: ${typedMessage}\n✅ Your ride is confirmed`
+);
+
+  function showPopup(message) {
+    popupText.innerText = message;
+
+    popupBg.style.display = "flex";
+
+    popupBg.classList.remove("fade-in");
+    void popupBg.offsetWidth;
+    popupBg.classList.add("fade-in");
+  }
+
+  window.closePopup= function() {
+    popupBg.classList.remove("fade-in");
+    popupBg.classList.add("fade-out");
+
+    setTimeout(() => {
+      popupBg.style.display = "none";
+      popupBg.classList.remove("fade-out");
+    }, 300);
+  }
+
+  function celebrate() {
+    confetti({
+      particleCount: 2000,
+      spread: 90,
+      startVelocity: 45,
+      origin: { y: 0.7 }
+    });
+  }
       const btn = [...document.querySelectorAll(".driverItem button")].find(
         (b) => b.parentElement.textContent.includes(driverId.substring(0, 6))
       );
@@ -751,6 +856,10 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
   document.getElementById("driverdel").addEventListener("click", function() {
   window.location.href = "driverdel.html"; // redirect to delete page
 });
+
+onValue(ref(db, "drivers"), snap => {
+   console.log("🔥 DRIVER UPDATED BY:", snap.val()); 
+  });
 
 </script>
 <div class="popup-overlay" id="loginPopup">
