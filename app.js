@@ -226,46 +226,46 @@ io.on("connection", (socket) => {
 
   // Register driver
   socket.on("registerDriver", async ({ driverId }) => {
-    if (!driverId) return;
-    socket.driverId = driverId;
+  if (!driverId) return;
+  socket.driverId = driverId;
 
-    // Load from Firebase
-    const snap = await get(ref(db, `drivers/${driverId}`));
-    if (snap.exists()) {
-      const d = snap.val();
-      drivers[driverId] = {
-        socketId: socket.id,
-        online: 1,
-        lat: d.lat,
-        lng: d.lng,
-        rider1_id: d.rider1_id,
-        rider2_id: d.rider2_id,
-        booking1_code: d.booking1_code,
-        booking2_code: d.booking2_code,
-        rider1_lat: d.rider1_lat,
-        rider1_lng: d.rider1_lng,
-        rider2_lat: d.rider2_lat,
-        rider2_lng: d.rider2_lng,
-      };
-
-      // Send bookings back if any active
-      if (d.rider1_id)
-        socket.emit("bookingConfirmed", {
-          riderId: d.rider1_id,
-          lat: d.rider1_lat,
-          lng: d.rider1_lng,
-          bookingCode: d.booking1_code,
-        });
-
-      if (d.rider2_id)
-        socket.emit("bookingConfirmed", {
-          riderId: d.rider2_id,
-          lat: d.rider2_lat,
-          lng: d.rider2_lng,
-          bookingCode: d.booking2_code,
-        });
-    }
+  // Save real-time socket ID to Firebase
+  await update(ref(db, `drivers/${driverId}`), {
+    socketId: socket.id,
+    online: 1,
   });
+
+  // Load driver info
+  const snap = await get(ref(db, `drivers/${driverId}`));
+
+  if (snap.exists()) {
+    const d = snap.val();
+
+    // Store in memory
+    drivers[driverId] = {
+      ...d,
+      socketId: socket.id,
+      online: 1,
+    };
+
+    // Send bookings back to driver
+    if (d.rider1_id)
+      socket.emit("bookingConfirmed", {
+        riderId: d.rider1_id,
+        lat: d.rider1_lat,
+        lng: d.rider1_lng,
+        bookingCode: d.booking1_code,
+      });
+
+    if (d.rider2_id)
+      socket.emit("bookingConfirmed", {
+        riderId: d.rider2_id,
+        lat: d.rider2_lat,
+        lng: d.rider2_lng,
+        bookingCode: d.booking2_code,
+      });
+  }
+});
 
   // Driver location update
   socket.on("driverLocation", async ({ lat, lng, speed, accuracy }) => {
@@ -277,42 +277,40 @@ io.on("connection", (socket) => {
 
   // Rider location update
   socket.on("riderLocation", async (pos) => {
-    riders[socket.id] = { ...pos, id: socket.id };
-    const driverId = Object.keys(drivers).find(
-      (d) =>
-        drivers[d] &&
-        (drivers[d].rider1_id === socket.id ||
-          drivers[d].rider2_id === socket.id)
-    );
-    if (!driverId) return;
-    const driver = drivers[driverId];
 
-    let latKey = "",
-      lngKey = "";
-    if (driver.rider1_id === socket.id) {
-      latKey = "rider1_lat";
-      lngKey = "rider1_lng";
-    } else {
-      latKey = "rider2_lat";
-      lngKey = "rider2_lng";
-    }
+  riders[socket.id] = { ...pos, id: socket.id };
 
-    await update(ref(db, `drivers/${driverId}`), {
-      [latKey]: pos.lat,
-      [lngKey]: pos.lng,
-    });
+  const driverId = Object.keys(drivers).find(
+    (d) =>
+      drivers[d] &&
+      (drivers[d].rider1_id === socket.id ||
+        drivers[d].rider2_id === socket.id)
+  );
 
-    driver[latKey] = pos.lat;
-    driver[lngKey] = pos.lng;
+  if (!driverId) return;
 
-    if (driver.socketId) {
-      io.to(driver.socketId).emit("riderPositionUpdate", {
-        riderId: socket.id,
-        lat: pos.lat,
-        lng: pos.lng,
-      });
-    }
+  const driver = drivers[driverId];
+
+  let latKey = driver.rider1_id === socket.id ? "rider1_lat" : "rider2_lat";
+  let lngKey = driver.rider1_id === socket.id ? "rider1_lng" : "rider2_lng";
+
+  await update(ref(db, `drivers/${driverId}`), {
+    [latKey]: pos.lat,
+    [lngKey]: pos.lng,
   });
+
+  driver[latKey] = pos.lat;
+  driver[lngKey] = pos.lng;
+
+  // FIXED: Make sure real-time update reaches the correct driver
+  if (driver.socketId) {
+    io.to(driver.socketId).emit("riderPositionUpdate", {
+      riderId: socket.id,
+      lat: pos.lat,
+      lng: pos.lng,
+    });
+  }
+});
 
   // Rider books driver
   socket.on("bookDriver", async (driverId) => {
@@ -361,14 +359,16 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Driver disconnect
   socket.on("disconnect", async () => {
-    console.log("🔴 Socket disconnected:", socket.id);
-    if (socket.driverId) {
-      await update(ref(db, `drivers/${socket.driverId}`), { online: 0 });
-      delete drivers[socket.driverId];
-    }
-  });
+  if (socket.driverId) {
+    await update(ref(db, `drivers/${socket.driverId}`), {
+      online: 0,
+      socketId: null
+    });
+    delete drivers[socket.driverId];
+  }
+});
+
 });
 
 // --------------------
