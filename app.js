@@ -21,17 +21,15 @@ const app = express();
 // 🔥 Firebase Config
 // --------------------
 const firebaseConfig = {
-  apiKey: "AIzaSyARe_cDs_WHl7CkCJTjCEaTMFAksmi1SXg",
-  authDomain: "maps-41eca.firebaseapp.com",
-  databaseURL:
-    "https://maps-41eca-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "maps-41eca",
-  storageBucket: "maps-41eca.firebasestorage.app",
-  messagingSenderId: "850870521671",
-  appId: "1:850870521671:web:6a986f4f81a6cb976b8662",
-  measurementId: "G-VDW9C5BWL3",
+  apiKey: "AIzaSyCsZcn4VPhpnlgU0K_NPHPINjq9Qi5iVT8",
+  authDomain: "mydatabase-e7c01.firebaseapp.com",
+  databaseURL: "https://mydatabase-e7c01-default-rtdb.firebaseio.com",
+  projectId: "mydatabase-e7c01",
+  storageBucket: "mydatabase-e7c01.firebasestorage.app",
+  messagingSenderId: "447471871540",
+  appId: "1:447471871540:web:d48721caa65174b1598c61",
+  measurementId: "G-80M4PND75H"
 };
-
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 
@@ -89,7 +87,7 @@ function sanitizeDriversForBroadcast(driversObj) {
 // Insert driver
 app.post("/insert", async (req, res) => {
   try {
-    const { name, gmail, password, mobile } = req.body;
+    const { name, gmail, password, mobile ,lat, lng} = req.body;
 
     if (!name || !gmail || !password || !mobile) {
       return res.status(400).json({ message: "All fields are required!" });
@@ -224,81 +222,7 @@ app.post("/target", async (req, res) => {
 // Socket.IO Realtime Events
 // --------------------
 io.on("connection", (socket) => {
-  console.log("🟢 Socket connected:", socket.id);
-
-  socket.on("trackBooking", async (bookingCode) => {
-    try {
-      const snapshot = await get(ref(db, "drivers"));
-      let found = false;
-
-      snapshot.forEach((child) => {
-        const driver = child.val();
-
-        // Match booking1 or booking2 code
-        if (driver.booking1_code === bookingCode || driver.booking2_code === bookingCode) {
-          found = true;
-          const info = {
-            driverId: child.key,
-            driverLat: driver.lat,
-            driverLng: driver.lng,
-            riderId:
-              driver.booking1_code === bookingCode
-                ? driver.rider1_id
-                : driver.rider2_id,
-            riderLat:
-              driver.booking1_code === bookingCode
-                ? driver.rider1_lat
-                : driver.rider2_lat,
-            riderLng:
-              driver.booking1_code === bookingCode
-                ? driver.rider1_lng
-                : driver.rider2_lng,
-            bookingCode,
-            source:
-              driver.booking1_code === bookingCode
-                ? "rider1"
-                : "rider2",
-          };
-
-          // Send back data to frontend
-          socket.emit("trackResult", info);
-
-          // ✅ Now start live updates
-          socket.emit("trackLive", bookingCode);
-        }
-      });
-
-      if (!found) socket.emit("trackFailed", "❌ Invalid booking code!");
-    } catch (err) {
-      console.error("trackBooking error:", err);
-      socket.emit("trackFailed", "❌ Server error tracking booking!");
-    }
-  });
-
-  // 🟢 2. Live tracking listener
-  socket.on("trackLive", async (bookingCode) => {
-    const driversRef = ref(db, "drivers");
-    onValue(driversRef, (snapshot) => {
-      snapshot.forEach((child) => {
-        const d = child.val();
-
-        // When driver or rider moves, send updates
-        if (d.booking1_code === bookingCode) {
-          io.to(socket.id).emit("liveDriverUpdate", { lat: d.lat, lng: d.lng });
-          io.to(socket.id).emit("liveRiderUpdate", {
-            lat: d.rider1_lat,
-            lng: d.rider1_lng,
-          });
-        } else if (d.booking2_code === bookingCode) {
-          io.to(socket.id).emit("liveDriverUpdate", { lat: d.lat, lng: d.lng });
-          io.to(socket.id).emit("liveRiderUpdate", {
-            lat: d.rider2_lat,
-            lng: d.rider2_lng,
-          });
-        }
-      });
-    });
-  });
+  console.log("🟢 Socket connected:", socket.id); 
 
   // Register driver
   socket.on("registerDriver", async ({ driverId }) => {
