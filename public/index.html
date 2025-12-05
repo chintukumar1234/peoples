@@ -385,7 +385,7 @@
         font-size: 1.2rem;
       }
       .mess{
-        font-size: 13px;
+        font-size: 11px;
       }
       .h{
       bottom:60px;
@@ -393,7 +393,7 @@
     }
     }
 
-  #m { display: none; }
+    #m { display: none; }
 
   #popup-bg {
     display: none;
@@ -478,12 +478,18 @@
         <div id="message2"></div>
         <input type="text" id="destination" placeholder="Enter your destination">
       </div>
+
+      <div class="form-group">
+        <label for="mobile">Mobile Number</label>
+        <div id="message3"></div>
+        <input type="text" id="mobile" placeholder="Enter your mobile no...">
+      </div>
       <button class="book-btn" id="showDriversBtn">Show Available Drivers</button>
       <div id="driversList">
         <p style="color:#888;">Driver list will appear here after entering pickup & destination.</p>
       </div>
     </div>
-    
+
     <p id="m"></p>
     <div id="popup-bg">
       <div id="popup-box">
@@ -505,7 +511,7 @@
         <button onclick="openLoginPopup()" class="btn">Driver Login</button>
       </div>
       <div class="card">
-        <h3>🤖 AI Tracking</h3>
+        <h3>🤖 Feedback</h3>
         <p>Powered by Node.js, Express & Socket.io, this AI module ensures efficient route prediction and smart ride synchronization.</p>
         <button type="submit" class="btn" id="driverdel" value="Submit">Click here</button>
       </div>
@@ -536,124 +542,30 @@
     </div>
   </div>
   <footer>
-    © 2025 <span>AI Cab Tracker</span> | Built with ❤️ by Chintu
+    © 2025 <span>AI Cab Tracker</span> | Built with❤️ by Chintu
   </footer>
 
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js" crossorigin="anonymous"></script>
 <script type="module">
-
-  window.c=function() {
-    document.getElementById("popup").style.display = "none";
-  }
-
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-  import { getDatabase, ref, set, get, child, push, query, orderByChild, equalTo ,onValue} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
-
-  const firebaseConfig = {
-  apiKey: "AIzaSyCsZcn4VPhpnlgU0K_NPHPINjq9Qi5iVT8",
-  authDomain: "mydatabase-e7c01.firebaseapp.com",
-  databaseURL: "https://mydatabase-e7c01-default-rtdb.firebaseio.com",
-  projectId: "mydatabase-e7c01",
-  storageBucket: "mydatabase-e7c01.firebasestorage.app",
-  messagingSenderId: "447471871540",
-  appId: "1:447471871540:web:d48721caa65174b1598c61",
-  measurementId: "G-80M4PND75H"
-};
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-  /*Driver information in the databases*/
-document.getElementById("registerForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-
-  const name = document.getElementById("name").value.trim();
-  const mobile = document.getElementById("mobile").value.trim();
-  const gmail = document.getElementById("gmail").value.trim();
-  const password = document.getElementById("password").value;
-  const conform = document.getElementById("conform").value;
-  const msg = document.getElementById("message");
-
-  msg.innerText = "";
-
-  // ✅ 1. Validate required fields
-  if (!name || !mobile || !gmail || !password || !conform) {
-    msg.innerText = "⚠️ All fields are required!";
-    return;
-  }
-
-  // ✅ 2. Check password match
-  if (password !== conform) {
-    msg.innerText = "⚠️ Passwords do not match!";
-    return;
-  }
-
-  try {
-    // ✅ 3. Check if Gmail already exists
-    const snapshot = await get(ref(db, "drivers"));
-    let exists = false;
-
-    snapshot.forEach(childSnap => {
-      if (childSnap.val().gmail === gmail) exists = true;
-    });
-
-    if (exists) {
-      msg.innerText = "⚠️ Gmail already registered!";
-      return;
-    }
-
-    // ✅ 4. Create new driver
-    const newDriverRef = push(ref(db, "drivers"));
-    await set(newDriverRef, {
-      id: newDriverRef.key,
-      name,
-      gmail,
-      password,
-      mobile,
-      online: 1,
-
-      // Rider 1 details
-      rider1_id: null,
-      booking1_code: null,
-      rider1_created_at: null,
-      rider1_lat: null,
-      rider1_lng: null,
-
-      // Rider 2 details
-      rider2_id: null,
-      booking2_code: null,
-      rider2_created_at: null,
-      rider2_lat: null,
-      rider2_lng: null,
-
-      // Driver location
-      lat: null,
-      lng: null,
-    });
-
-    msg.innerText = "✅ Driver registered successfully!";
-    localStorage.setItem("driverId", newDriverRef.key);
-    document.getElementById("registerForm").reset();
-  } catch (error) {
-    console.error("❌ Error registering driver:", error);
-    msg.innerText = "❌ Error registering driver!";
-  }
-});
-
-  /*server sider languages connection*/
-  const socket = io({
+    const socket = io({
     reconnection: true,
     reconnectionAttempts: Infinity,
     transports: ['websocket', 'polling']
   });
 
-  let driversData = {}; // latest driver info
-  let myCoords = null;
 
+  document.getElementById("driverdel").addEventListener("click",function(){
+    window.location.href="driverdel.html";
+  });
   const showDriversBtn = document.getElementById('showDriversBtn');
   const driversList = document.getElementById('driversList');
   const pickupInput = document.getElementById('pickup');
+  const mobileInput = document.getElementById('mobile');
   const destinationInput = document.getElementById('destination');
-
-  // 🌍 Send rider's real GPS location to server
+  
+    // 🌍 Send rider's real GPS location to server
+   let driverData={};
+   let myCoords = null;
   if (navigator.geolocation) {
     navigator.geolocation.watchPosition(
       (pos) => {
@@ -667,14 +579,14 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
     alert("Geolocation is not supported in your browser.");
   }
 
-  // 🔄 Receive all drivers' data
   socket.on('updateDrivers', (drivers) => {
     driversData = drivers;
   });
-  // 🚕 Show unbooked drivers when form is filled
-  showDriversBtn.addEventListener('click', () => {
+
+    showDriversBtn.addEventListener('click', () => {
     const pickup = pickupInput.value.trim();
     const destination = destinationInput.value.trim();
+    const mobile=mobileInput.value.trim();
     //driver information
     const popup = document.getElementById("popup");
     if(pickup==="Driverdanapur"&&destination==="chintukr@@123"){
@@ -696,175 +608,272 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
         document.getElementById("message2").innerHTML='';
       },5000);
       return;
-    }else{
-    pickupInput.value = "";
-    destinationInput.value = "";
+    }else if(!mobile){
+       document.getElementById("message3").innerHTML=`<span class="mess">Please Enter mobile no..</span>`;
+      setTimeout(()=>{
+        document.getElementById("message3").innerHTML='';
+      },5000);
+      return;
     }
     updateDriverList();
   });
-  // 🧾 Display available drivers dynamically
-    async function updateDriverList() {
-      const driversList = document.getElementById("driversList");
-      driversList.innerHTML = "";
 
-      try {
-        const snapshot = await get(ref(db, "drivers"));
-        if (!snapshot.exists()) {
-          driversList.innerHTML = "<p style='color:#888;'>No available drivers found.</p>";
-          return;
-        }
+  window.c=function() {
+    document.getElementById("popup").style.display = "none";
+  }
 
-        const drivers = [];
-        snapshot.forEach(childSnap => {
-          const d = childSnap.val();
-          if (d.online === 1) {
-            drivers.push({ id: childSnap.key, ...d });
-          }
-        });
+  window.openLoginPopup=function(){
+  document.getElementById('loginPopup').style.display="flex";
+}
 
-        if (drivers.length === 0) {
-          driversList.innerHTML = "<p style='color:#888;'>No available drivers found.</p>";
-          return;
-        }
+window.closePopups=function(){
+  document.getElementById('loginPopup').style.display="none";
+}
+ 
+document.getElementById("registerForm").addEventListener("submit", (e) => {
+  e.preventDefault();
 
-        drivers.forEach(d => {
-          const div = document.createElement("div");
-          div.className = "driverItem";
-          div.innerHTML = `<span>🚗 ${d.name} (${d.mobile})</span>`;
-          
-          const btn = document.createElement("button");
-          btn.textContent = "Book";
-          btn.onclick = () => bookDriver(d.id);
+  const msg = document.getElementById("message");
+  msg.innerText = "📍 Getting location...";
 
-          div.appendChild(btn);
-          driversList.appendChild(div);
-        });
-      } catch (error) {
-        console.error(error);
-        driversList.innerHTML = "<p style='color:red;'>Error loading drivers!</p>";
-      }
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+
+    const name = document.getElementById("name").value.trim();
+    const mobile = document.getElementById("mobile").value.trim();
+    const gmail = document.getElementById("gmail").value.trim();
+    const password = document.getElementById("password").value;
+    const conform = document.getElementById("conform").value;
+
+    msg.innerText = "";
+
+    if (!name || !mobile || !gmail || !password || !conform) {
+      msg.innerText = "⚠️ All fields are required!";
+      return;
     }
-
-    window.updateDriverList = updateDriverList;
-
-    // 🚕 Book Driver
-    function bookDriver(driverId) {
-      const pickup = document.getElementById("pickup").value.trim();
-      const destination = document.getElementById("destination").value.trim();
-
-      // Send booking request to backend
-      socket.emit("bookDriver", driverId);
-    }
-
-    // ✅ Booking Success
-    socket.on("bookingSuccess", ({ driverId, bookingCode }) => {
-  const popupBg    = document.getElementById("popup-bg");
-  const popupText  = document.getElementById("popup-message");
-    const typedMessage = bookingCode;
-
-    if (!typedMessage) {
-      showPopup("Please enter a message!");
+    if (password !== conform) {
+      msg.innerText = "⚠️ Passwords do not match!";
       return;
     }
 
-    celebrate();
-    showPopup(
-  `✨ Driver Booked! ✨\n🚖 Booking Code: ${typedMessage}\n✅ Your ride is confirmed`
-);
-
-  function showPopup(message) {
-    popupText.innerText = message;
-
-    popupBg.style.display = "flex";
-
-    popupBg.classList.remove("fade-in");
-    void popupBg.offsetWidth;
-    popupBg.classList.add("fade-in");
-  }
-
-  window.closePopup= function() {
-    popupBg.classList.remove("fade-in");
-    popupBg.classList.add("fade-out");
-
-    setTimeout(() => {
-      popupBg.style.display = "none";
-      popupBg.classList.remove("fade-out");
-    }, 300);
-  }
-
-  function celebrate() {
-    confetti({
-      particleCount: 2000,
-      spread: 90,
-      startVelocity: 45,
-      origin: { y: 0.7 }
-    });
-  }
-      const btn = [...document.querySelectorAll(".driverItem button")].find(
-        (b) => b.parentElement.textContent.includes(driverId.substring(0, 6))
-      );
-      if (btn) {
-        btn.textContent = "Booked";
-        btn.disabled = true;
-      }
-    });
-
-    // ❌ Booking Failed
-    socket.on("bookingFailed", (msg) => {
-      alert(`❌ Booking failed: ${msg}`);
-      console.log("Booking error:", msg);
-    });
-
-  window.openLoginPopup=function() { document.getElementById("loginPopup").style.display = "flex"; }
-  window.closePopup=function() {
-    document.getElementById("loginPopup").style.display = "none";
-  }
-  window.loginDriver = async function () {
-    const gmail = document.getElementById("loginGmail").value.trim();
-    const password = document.getElementById("loginPassword").value.trim();
-    const msg = document.getElementById("loginMessage");
-
-    if (!gmail || !password) {
-      msg.innerText = "⚠️ Please fill all fields.";
-      return;
-    }
+    const data = { name, gmail, password, mobile, lat, lng };
 
     try {
-      const snapshot = await get(ref(db, "drivers"));
-      let found = null;
-
-      snapshot.forEach(childSnap => {
-        const d = childSnap.val();
-        if (d.gmail === gmail && d.password === password) {
-          found = { id: childSnap.key, ...d };
-        }
+      const res = await fetch("/insert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
       });
 
-      if (found) {
-        msg.innerText = "✅ Login successful!";
-        localStorage.setItem("driverId", found.id);
-        localStorage.setItem("driverName", found.name);
-        window.location.href = "/driver.html";
-      } else {
-        msg.innerText = "❌ Invalid Gmail or Password!";
-      }
-    } catch (error) {
-      console.error(error);
-      msg.innerText = "⚠️ Login error!";
+      const out = await res.json();
+      msg.innerText = out.message;
+    } catch (err) {
+      msg.innerText = "❌ Error: " + err;
     }
-  };
-  document.getElementById("driverdel").addEventListener("click", function() {
-  window.location.href = "driverdel.html"; // redirect to delete page
+
+  }, () => {
+    msg.innerText = "❌ Location access denied!";
+  });
+
 });
 
-onValue(ref(db, "drivers"), snap => {
-   console.log("🔥 DRIVER UPDATED BY:", snap.val()); 
+// 🧾 Display available drivers dynamically (from backend)
+async function updateDriverList() {
+  const driversList = document.getElementById("driversList");
+  driversList.innerHTML = "";
+
+  try {
+    const res = await fetch("/show", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+
+    const data = await res.json();
+    const drivers = data.drivers;
+
+    if (!drivers || drivers.length === 0) {
+      driversList.innerHTML = "<p style='color:#888;'>No available drivers found.</p>";
+      return;
+    }
+
+    drivers.forEach(d => {
+      if(!d.Rider1_id||!d.Rider2_id){
+      const div = document.createElement("div");
+      div.className = "driverItem";
+
+      div.innerHTML = `<span>🚗 ${d.name} (${d.mobile})</span>`;
+
+      const btn = document.createElement("button");
+      btn.textContent = "Book";
+      btn.onclick = () => bookDriver(d.id);
+
+      div.appendChild(btn);
+      driversList.appendChild(div);
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+    driversList.innerHTML = "<p style='color:red;'>Error loading drivers!</p>";
+  }
+}
+
+window.updateDriverList = updateDriverList;
+
+    function bookDriver(driverId) {
+
+  const pickup = document.getElementById("pickup").value.trim();
+  const destination = document.getElementById("destination").value.trim();
+
+  if (!pickup || !destination) {
+    alert("Please enter pickup and destination!");
+    return;
+  }
+ const lat = myCoords ? myCoords.lat : null;
+const lng = myCoords ? myCoords.lng : null;
+    // Prepare full booking data object
+    if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) {
+  alert("❌ Unable to get your location. Please enable GPS or try again.");
+  return;
+}
+
+    const bookingData = {
+      driverId,
+      riderId:Math.random().toString(36).substring(2, 12).toUpperCase(),             // You can generate real ID later
+      code:Math.random().toString(36).substring(2, 8).toUpperCase(),      // Unique booking code
+      lat,
+      lng,
+      createdAt: Date.now(),
+      pickup,
+      destination
+    };
+
+    console.log("📤 Sending booking:", bookingData);
+
+    // Send to backend using socket.io
+     pickupInput.value = "";
+    destinationInput.value = "";
+    mobileInput.value="";
+    socket.emit("bookDriver", bookingData);
+
+  
+}
+
+    // =====================================================
+//  POPUP + CELEBRATION FUNCTIONS (defined once)
+// =====================================================
+
+function showPopup(message) {
+  const popupBg   = document.getElementById("popup-bg");
+  const popupText = document.getElementById("popup-message");
+
+  popupText.innerText = message;
+  popupBg.style.display = "flex";
+
+  popupBg.classList.remove("fade-in");
+  void popupBg.offsetWidth;
+  popupBg.classList.add("fade-in");
+}
+
+window.closePopup = function () {
+  const popupBg = document.getElementById("popup-bg");
+
+  popupBg.classList.remove("fade-in");
+  popupBg.classList.add("fade-out");
+
+  setTimeout(() => {
+    popupBg.style.display = "none";
+    popupBg.classList.remove("fade-out");
+  }, 300);
+};
+
+function celebrate() {
+  confetti({
+    particleCount: 2000,
+    spread: 90,
+    startVelocity: 45,
+    origin: { y: 0.7 }
   });
+}
+
+// =====================================================
+//  SOCKET EVENTS
+// =====================================================
+
+// ✅ Booking Success
+socket.on("bookingSuccess", ({ driverId, bookingData }) => {
+
+  // bookingData contains:
+  // { bookingCode, lat, lng, slot, createdAt }
+
+  const bookingCode = bookingData.bookingCode;
+
+  celebrate();
+
+  showPopup(
+    `✨ Driver Booked Successfully! ✨
+🚖 Booking Code: ${bookingCode}
+🎉 Your ride is confirmed`
+  );
+
+  // Disable the booked driver button
+  const btn = [...document.querySelectorAll(".driverItem button")].find(
+    (b) => b.parentElement.textContent.includes(driverId.substring(0, 6))
+  );
+
+  if (btn) {
+    btn.textContent = "Booked";
+    btn.disabled = true;
+  }
+});
+
+
+// ❌ Booking Failed
+socket.on("bookingFailed", (msg) => {
+  alert(`❌ Booking failed: ${msg}`);
+  console.log("Booking error:", msg);
+});
+
+//now here is the login logic for driver
+window.loginDriver = function () {
+  const loginGmail = document.getElementById("loginGmail").value.trim();
+  const loginPassword = document.getElementById("loginPassword").value.trim();
+
+  if (!loginGmail) {
+    alert("Please enter the gmail");
+    return;
+  }
+
+  if (!loginPassword) {
+    alert("Please enter the password");
+    return;
+  }
+
+  fetch("/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gmail: loginGmail, password: loginPassword })
+  })
+    .then(res => res.json())
+    .then(data => {
+      console.log("Response:", data);
+
+      if (data.error) {
+        alert(data.error);
+      } else {
+        const userId = data.loggedInUser.id;
+        localStorage.setItem("userId", userId);
+        window.location.href = "driver.html";
+      }
+    });
+};
 
 </script>
 <div class="popup-overlay" id="loginPopup">
   <div class="booking-form">
-    <button class="close-btn" onclick="closePopup()">×</button>
+    <button class="close-btn" onclick="closePopups()">×</button>
     <h3>Driver Login</h3>
     <label>Gmail</label>
     <input type="email" id="loginGmail" placeholder="Enter Gmail" required />

@@ -30,7 +30,6 @@
 </style>
 </head>
 <body>
-<audio id="n" src="ringtong.wav"></audio>
 <button class="toggle-btn" id="toggleBtn">☰</button>
 
 <div class="sidebar closed" id="sidebar">
@@ -85,158 +84,77 @@
 <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
 
 <script>
-/* ================= Config & state ================= */
-const storedDriverId = localStorage.getItem("driverId");
-const driverId = storedDriverId || prompt("Enter your driver ID (numeric DB id recommended):") || "";
-if (!driverId) alert("Driver ID is required — reload and enter ID.");
-localStorage.setItem("driverId", driverId);
-
-let sharing = false;
-let autoCenter = true;
+let sharing = 0;
 let watchId = null;
 let driverMarker = null;
+let autoCenter = true;
 let lastDriverPos = null;
-let routeMode = "car"; // 'car' or 'bike'
-
-// two slots: s1, s2 (max 2 riders)
-const slots = {
-  s1: { riderId: null, bookingCode: null, marker: null, route: null },
-  s2: { riderId: null, bookingCode: null, marker: null, route: null }
-};
-
-/* ================= DOM ================= */
-const sidebar = document.getElementById("sidebar");
-const toggleBtn = document.getElementById("toggleBtn");
+let routeMode = "car";
 const statusEl = document.getElementById("status");
+const shareBtn = document.getElementById("toggleShare");
+const toggleBtn = document.getElementById("toggleBtn");
 const speedEl = document.getElementById("speed");
 const accEl = document.getElementById("accuracy");
 const timeEl = document.getElementById("time");
-const shareBtn = document.getElementById("toggleShare");
+const slot1Info = document.getElementById("slot1_info");
+const slot2Info = document.getElementById("slot2_info");
 const centerBtn = document.getElementById("toggleCenter");
 const routeModeEl = document.getElementById("routeMode");
 const bookingCodeInput = document.getElementById("bookingCode");
 const clearByCodeBtn = document.getElementById("clearByCodeBtn");
 const messageEl = document.getElementById("message");
-const slot1Info = document.getElementById("slot1_info");
-const slot2Info = document.getElementById("slot2_info");
 
+const driverId = localStorage.getItem("userId");
+toggleBtn.addEventListener("click", ()=> {
+  sidebar.classList.toggle("closed");
+  toggleBtn.textContent = sidebar.classList.contains("closed") ? "☰" : "✖";
+});
+
+const slots = {
+  s1: { riderId: null, bookingCode: null, marker: null, route: null },
+  s2: { riderId: null, bookingCode: null, marker: null, route: null }
+};
 /* ================= Map ================= */
-// Initialize map
-const map = L.map('map').setView([28.6139, 77.2090], 13); // default view (New Delhi)
+const map = L.map('map').setView([0, 0], 13);
 
-// 🗺️ Base Layers
+// base layers
 const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
   attribution: '&copy; OpenStreetMap contributors'
 });
 
-const satelliteLayer = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  {
-    maxZoom: 18,
-    attribution: 'Tiles © Esri, Maxar, Earthstar Geographics'
-  }
-);
-
-const labelsLayer = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-  {
-    maxZoom: 18,
-    attribution: 'Labels © Esri'
-  }
-);
-
-const hybridLayer = L.layerGroup([satelliteLayer, labelsLayer]);
-
-// Add default layer
-streetLayer.addTo(map);
-
-// Add control to switch layers
-L.control.layers({
-  "Street Map": streetLayer,
-  "Satellite": satelliteLayer,
-  "Hybrid": hybridLayer
-}).addTo(map);
-
-// 📍 Real-time location tracking
-let userMarker = null;
-let accuracyCircle = null;
-
-function onLocationFound(e) {
-  const { latlng, accuracy } = e;
-
-  // Update or create marker
-  if (!userMarker) {
-    userMarker = L.marker(latlng)
-      .addTo(map)
-      .bindPopup("📍 You are here")
-      .openPopup();
-  } else {
-    userMarker.setLatLng(latlng);
-  }
-
-  // Update or create accuracy circle
-  if (!accuracyCircle) {
-    accuracyCircle = L.circle(latlng, { radius: accuracy / 2 }).addTo(map);
-  } else {
-    accuracyCircle.setLatLng(latlng);
-    accuracyCircle.setRadius(accuracy / 2);
-  }
-
-  // Keep map centered on user
-  map.setView(latlng, map.getZoom());
-}
-
-function onLocationError(e) {
-  alert(`⚠️ Location error: ${e.message}`);
-}
-
-// Watch position continuously
-map.locate({
-  watch: true,     // keeps updating
-  setView: false,  // we manually handle centering
-  enableHighAccuracy: true
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19,
+  attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
 });
 
-map.on("locationfound", onLocationFound);
-map.on("locationerror", onLocationError);
+// add default
+streetLayer.addTo(map);
+
+// add layer control
+L.control.layers({
+  "Street Map": streetLayer,
+  "Satellite": satelliteLayer
+}).addTo(map);
 
 /* ================= Socket ================= */
 const socket = io({ reconnection:true, transports:['websocket','polling'] });
 
 socket.on("connect", ()=> {
   console.log("Socket connected");
-  socket.emit("registerDriver", { driverId });
+  socket.on("registerDriver", async ({ driverId }) => {
+    drivers[driverId] = {
+        socketId: socket.id,
+    }
 });
 
-/* ================= UI handlers ================= */
-toggleBtn.addEventListener("click", ()=> {
-  sidebar.classList.toggle("closed");
-  toggleBtn.textContent = sidebar.classList.contains("closed") ? "☰" : "✖";
 });
 
+//==============================================
 shareBtn.addEventListener("click", ()=> sharing ? stopSharing() : startSharing());
 window.addEventListener("load", () => {
   startSharing();
 });
-
-centerBtn.addEventListener("click", ()=> {
-  autoCenter = !autoCenter;
-  centerBtn.textContent = `Auto-Center: ${autoCenter ? "ON" : "OFF"}`;
-});
-routeModeEl.addEventListener("change", ()=> {
-  routeMode = routeModeEl.value;
-  // recreate routes using new profile
-  ["s1","s2"].forEach(id => {
-    if (slots[id].route) {
-      try { map.removeControl(slots[id].route); } catch (e) {}
-      slots[id].route = null;
-      if (slots[id].marker && driverMarker) createRoute(id);
-    }
-  });
-});
-clearByCodeBtn.addEventListener("click", clearByCode);
-
 /* ================= Helpers ================= */
 function setSharingState(on) {
   sharing = on;
@@ -258,9 +176,9 @@ function haversineKm(lat1, lon1, lat2, lon2){
 function startSharing(){
   if (!navigator.geolocation) return alert("Geolocation not supported in this browser.");
 
-  setSharingState(true);
+  setSharingState(1);
   // update DB online flag
-  fetch("/updateOnline", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: driverId, online: true }) });
+  fetch("/updateOnline", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: driverId, online: 1 }) });
 
   watchId = navigator.geolocation.watchPosition(position => {
     const { latitude: lat, longitude: lng, speed, accuracy } = position.coords;
@@ -295,35 +213,47 @@ function startSharing(){
 }
 
 function stopSharing(){
-  setSharingState(false);
-  fetch("/updateOnline", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: driverId, online: false }) });
+  setSharingState(0);
+  fetch("/updateOnline", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: driverId, online: 0 }) });
   if (watchId) {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
   }
 }
 
-/* ================= Booking / rider events ================= */
-socket.on("bookingConfirmed", ({ riderId, lat, lng, bookingCode }) => {
-  if (slots.s1.riderId === riderId || slots.s2.riderId === riderId) return;
+centerBtn.addEventListener("click", ()=> {
+  autoCenter = !autoCenter;
+  centerBtn.textContent = `Auto-Center: ${autoCenter ? "ON" : "OFF"}`;
+});
 
-  const emptySlot = !slots.s1.riderId ? "s1" : (!slots.s2.riderId ? "s2" : null);
+routeModeEl.addEventListener("change", ()=> {
+  routeMode = routeModeEl.value;
+  // recreate routes using new profile
+  ["s1","s2"].forEach(id => {
+    if (slots[id].route) {
+      try { map.removeControl(slots[id].route); } catch (e) {}
+      slots[id].route = null;
+      if (slots[id].marker && driverMarker) createRoute(id);
+    }
+  });
+});
+clearByCodeBtn.addEventListener("click", clearByCode);
+/* ================= Booking / rider events ================= */
+socket.on("bookingConfirmed", ({ RiderId, lat, lng, bookingCode }) => {
+  if (slots.s1.RiderId === RiderId || slots.s2.RiderId === RiderId) return;
+
+  const emptySlot = !slots.s1.RiderId ? "s1" : (!slots.s2.RiderId ? "s2" : null);
   if (!emptySlot) {
     alert("New booking arrived but you already have 2 riders.");
     return;
   }
 
   // Save booking info
-  slots[emptySlot].riderId = riderId;
+  slots[emptySlot].RiderId = RiderId;
   slots[emptySlot].bookingCode = bookingCode || "—"; // ✅ show bookingCode
-  slots[emptySlot].marker = createRiderMarker(lat, lng, riderId);
+  slots[emptySlot].marker = createRiderMarker(lat, lng, RiderId);
   updateSlotInfo(emptySlot);
   createRoute(emptySlot);
-
-  document.body.addEventListener("click", () => {
-  const n = document.getElementById("n");
-  n.play().catch(() => console.log("🔈 Sound unlocked"));
-}, { once: true });
 });
 // Rider location updates (server emits to driver)
 socket.on("riderPositionUpdate", ({ riderId, lat, lng }) => {
@@ -346,6 +276,7 @@ socket.on("riderPositionUpdate", ({ riderId, lat, lng }) => {
   updateSlotInfo(slotKey);
   updateRoute(slotKey);
 });
+
 /* ================= Marker & routing utilities ================= */
 function createRiderMarker(lat, lng, riderId) {
   const icon = L.icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/3448/3448339.png", iconSize: [36,36], iconAnchor:[18,36] });
@@ -370,7 +301,7 @@ function createRoute(slotKey) {
   slots[slotKey].route = L.Routing.control({
     waypoints: [driverPos, riderPos],
     router: L.Routing.osrmv1({
-      serviceUrl: 'http://127.0.0.1:5000/route/v1',
+      serviceUrl: 'https://router.project-osrm.org/route/v1',
       profile: profile
     }),
     routeWhileDragging: false,
@@ -513,6 +444,7 @@ socket.on("bookingCancelled", ({ bookingCode }) => {
   console.log("Booking cancelled:", bookingCode);
   alert(`Rider cancelled booking ${bookingCode}`);
 });
+
 
 </script>
 </body>
