@@ -350,22 +350,16 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Disconnect handling
   socket.on("disconnect", async () => {
-    if (!socket.driverId) return;
-
-    const did = socket.driverId;
-    try {
-      await update(ref(db, `drivers/${did}`), { online: 0 });
-    } catch (e) {
-      console.warn("Failed to set driver online=0 on disconnect:", e.message);
-    }
-
-    // remove in-memory mapping
-    delete drivers[did];
-  });
+  if (socket.driverId) {
+    const driverId = socket.driverId;  // store before resetting
+    // keep online = 1 (your requirement)
+    await update(ref(db, `drivers/${driverId}`), { online: 1 });
+    // remove from in-memory store
+    delete drivers[driverId];
+  }
 });
-
+});
 /* ========== Start server ========== */
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
