@@ -29,9 +29,13 @@
     th, td { padding: 10px; border-bottom: 1px solid #eef2f7; text-align: left; vertical-align: top; }
     th { background: var(--accent); color: white; text-transform: uppercase; letter-spacing: 0.03em; }
     tr.onlineRow:hover { background: #ecfdf5; } tr.offlineRow:hover { background: #fef2f2; }
-    .viewMapBtn, .deleteBtn { border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: #fff; font-size: 14px; transition: 0.2s; margin: 3px 0; }
-    .viewMapBtn { background: var(--success); } .deleteBtn { background: var(--danger); }
-    .viewMapBtn:hover { background: #22b55b; } .deleteBtn:hover { background: #f05252; }
+    .viewMapBtnR1, .deleteBtn { border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: #fff; font-size: 10px; transition: 0.2s; margin: 3px 0;}
+    .viewMapBtnR1 { background: var(--success); } .deleteBtn { background: var(--danger); }
+    .viewMapBtnR1:hover { background: #22b55b; } .deleteBtn:hover { background: #f05252; }
+
+    .viewMapBtnR2, .deleteBtn { border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: #fff; font-size: 10px; transition: 0.2s; margin: 3px 0; }
+    .viewMapBtnR2 { background: var(--success); } .deleteBtn { background: var(--danger); }
+    .viewMapBtnR2:hover { background: #22b55b; } .deleteBtn:hover { background: #f05252; }
 
     #mapPopup { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); justify-content: center; align-items: center; z-index: 9999; backdrop-filter: blur(4px); }
     #mapBox { width: 90%; height: 80%; background: var(--card-bg); border-radius: 14px; overflow: hidden; position: relative; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25); animation: fadeIn 0.3s ease; }
@@ -60,7 +64,6 @@
 
 </head>
 <body>
-  <h1>Admin — Drivers (with Directions) — NO SOCKET</h1>
 
   <div class="qrcode" id="hiip">
     <div id="p"></div>
@@ -75,8 +78,6 @@
 <button class="qrcodeclose" id="cliclose">Close QR Code</button>
 </div>
 
-<button id="clickhere">open QR code</button>
-
   <div class="toolbar">
     <div class="meta">
       <input id="searchInput" placeholder="Search name, gmail or mobile" oninput="renderTable()" />
@@ -84,6 +85,7 @@
     </div>
     <div>
       <button onclick="renderTable()">Refresh</button>
+      <button id="clickhere">open QR code</button>
       <button id="payhere" > payment</button>
     </div>
   </div>
@@ -191,21 +193,27 @@
       tr.className = d.online ? 'onlineRow' : 'offlineRow';
 
       tr.innerHTML = `
+        <tr>
         <td>${d.name || '-'}</td>
         <td>${d.gmail || '-'}</td>
         <td>${d.mobile || '-'}</td>
         <td>${d.online ? '🟢 Online' : '🔴 Offline'}</td>
+
         <td>
-          <div>👤 Rider1: ${d.Rider1_id || '-'}</div>
-          <div>Code: ${d.Booking1_code || '-'}</div>
-          <hr>
-          <div>👤 Rider2: ${d.Rider2_id || '-'}</div>
-          <div>Code: ${d.Booking2_code || '-'}</div>
+            <div>👤 Rider1: ${d.Rider1_id || '-'}</div>
+             <div>Code: ${d.Booking1_code || '-'}</div>
+            <button class="viewMapBtnR1" data-driver="${id}" data-rider="${d.Rider1_id || ''}">🗺️ View R1</button>
+            <hr>
+            <div>👤 Rider2: ${d.Rider2_id || '-'}</div>
+            <div>Code: ${d.Booking2_code || '-'}</div>
+            <button class="viewMapBtnR2" data-driver="${id}" data-rider="${d.Rider2_id || ''}">🗺️ View R2</button>
         </td>
+
         <td>
-          <button class="viewMapBtn" data-id="${id}">🗺️ View Map</button>
-          <button class="deleteBtn" data-id="${id}">🗑️ Delete</button>
+            <button class="deleteBtn" data-id="${id}">🗑️ Delete</button>
         </td>
+      </tr>
+
       `;
 
       tbody.appendChild(tr);
@@ -223,7 +231,22 @@
       };
     });
 
-    document.querySelectorAll('.viewMapBtn').forEach(btn => { btn.onclick = () => { openDriverMap(btn.dataset.id); }; });
+   document.querySelectorAll('.viewMapBtnR1').forEach(btn => {
+    btn.onclick = () => {
+        const driverId = btn.dataset.driver;
+        const riderId = btn.dataset.rider;
+        openDriverMap(driverId, riderId);
+    };
+});
+
+document.querySelectorAll('.viewMapBtnR2').forEach(btn => {
+    btn.onclick = () => {
+        const driverId = btn.dataset.driver;
+        const riderId = btn.dataset.rider;
+        openDriverMap(driverId, riderId);
+    };
+});
+
   };
 
   function clearMapState() {
@@ -270,7 +293,7 @@
     drawPolylinesFromRoutes(routes);
   }
 
-async function openDriverMap(driverId) {
+async function openDriverMap(driverId, activeRiderId) {
     const popup = document.getElementById('mapPopup'); 
     popup.style.display = 'flex';
 
@@ -297,27 +320,26 @@ async function openDriverMap(driverId) {
     }
 
     // 🟢 FIXED — Start sending LIVE rider location to backend
-    navigator.geolocation.watchPosition((pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
+    // Start GPS tracking for ONLY this rider
+navigator.geolocation.watchPosition((pos) => {
+    if (!activeRiderId) return;
 
-        let riderId = null;
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
 
-        // choose correct riderId
-        if (driver.Rider1_id) riderId = driver.Rider1_id;
-        if (driver.Rider2_id) riderId = driver.Rider2_id; // last rider replaces first
-
-        if (!riderId) return;
-
-        socket.emit("riderLiveLocation", { riderId, lat, lng });
-
-    }, (err) => {
-        console.error("Geolocation error:", err);
-    }, {
-        enableHighAccuracy: true,
-        maximumAge: 1000,
-        timeout: 10000
+    socket.emit("riderLiveLocation", {
+        riderId: activeRiderId,
+        lat,
+        lng
     });
+
+}, (err) => {
+    console.error("Geolocation error:", err);
+}, {
+    enableHighAccuracy: true,
+    maximumAge: 1000,
+    timeout: 10000
+});
 
     // create map
     currentMap = L.map(mapEl);
